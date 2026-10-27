@@ -63,9 +63,9 @@ static const gpio_num_t OTROS[] = { GPIO_NUM_19, GPIO_NUM_5, GPIO_NUM_18, GPIO_N
 /* ------------------------------------------------------------------ control */
 #define PWM_MAX      1023
 #define RAMPA        3                /* PWM por ms: de 0 a 100 % en 0,34 s */
-#define VBUS         12.0f
+#define VBUS         12.0f            /* voltaje de la fuente [V]; lab4_panel.py --vbus lo cambia en vivo */
 #define V0           0.8f             /* zona muerta del TB6612 + fricción seca [V] (L298N del lab: 1,197) */
-#define VGAIN        1.0f             /* ganancia del driver (L298N del lab: 0,9782) */
+#define VGAIN_LAB    1.0f             /* ganancia del driver con el modelo del lab (L298N del lab: 0,9782) */
 #define TS           0.01f
 #define RPM          (3.14159265f / 30.0f)
 #define TIMEOUT_MS   1500
@@ -149,9 +149,16 @@ static void obs_paso(obs_t *o, float u_prev, float y)
     o->Pk[1][1] = o->Pm[1][1] - o->K[1] * o->Pm[1][1];
 }
 
+/* Voltaje del modelo:  V = g * vbus * duty - signo * V0  (0 dentro de la zona muerta).
+ * Con el modelo corregido, g = (vbus + V0) / vbus: así al 100 % el modelo recibe exactamente vbus (12 V), que es
+ * el voltaje con el que se ajustaron 114,3 rpm y 0,2 A. Con Ra = 2,2 ohm cada 0,1 V de error son ~45 mA de
+ * error en la corriente estimada, así que restarle 0,8 V al 100 % la dejaba casi en 0. */
+static volatile float vbus = VBUS;
+
 static float voltaje(float duty_frac)
 {
-    float v = VGAIN * VBUS * duty_frac;
+    float g = MODELO_CORREGIDO ? (vbus + V0) / vbus : VGAIN_LAB;
+    float v = g * vbus * duty_frac;
     float a = fabsf(v) - V0;
     return a <= 0.0f ? 0.0f : copysignf(a, v);
 }
@@ -279,6 +286,8 @@ static void tarea_serial(void *arg)
                 if (p < -100) p = -100;
                 pwm_pedido = (int)lroundf(p * PWM_MAX / 100.0f);
                 t_ultima_orden = esp_timer_get_time();
+            } else if (sscanf(linea, "v %f", &p) == 1) {
+                if (p > 5.0f && p < 30.0f) vbus = p;                      /* voltaje real de la fuente */
             } else if (linea[0] == 'r') {
                 pedir_reset = 1;
                 t_ultima_orden = esp_timer_get_time();

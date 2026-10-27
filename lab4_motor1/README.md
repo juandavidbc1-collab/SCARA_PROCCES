@@ -82,6 +82,13 @@ Todo está referido al eje de salida, con discretización ZOH y Ts = 10 ms.
 
 **Comprobación:** el código del observador del firmware da los mismos números que la implementación en Python con la que se validó el laboratorio (diferencia máxima de 5×10⁻⁶).
 
-**Driver:** si usas un L298N en lugar del TB6612, cambia en `src/main.c`: `VGAIN 0.9782f` y `V0 1.197f`.
+**Voltaje de la fuente.** Con Ra = 2,2 Ω la corriente estimada es muy sensible al voltaje: cada 0,1 V de error son unos 45 mA, y cada rpm de diferencia en la velocidad, unos 46 mA. Por eso:
+
+- Al 100 % de PWM el modelo recibe exactamente el voltaje de la fuente (12 V). Ese es el voltaje con el que se ajustaron 114,3 rpm y 0,2 A, así que la zona muerta de 0,8 V solo se nota con PWM bajo.
+- Mide la fuente con el multímetro y pásala al programa: `py lab4_panel.py --vbus 12.3`.
+
+A 100 % la estimada da 0,2 A solo si el motor gira a 114,3 rpm. Si gira más lento (por carga, por el eslabón o por una fuente más baja), la corriente real también es mayor, y la estimada lo refleja.
+
+**Driver:** si usas un L298N en lugar del TB6612, cambia en `src/main.c`: `V0 1.197f` y, con el modelo del laboratorio, `VGAIN_LAB 0.9782f`.
 
 En modo `--demo`, la tecla `f` simula que frenas el motor con la mano.
