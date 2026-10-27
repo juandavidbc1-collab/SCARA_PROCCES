@@ -126,10 +126,13 @@ class Demo:
             dm = dsum / 10; v = 12 * dm; a = abs(v) - 0.8; u = 0.0 if a <= 0 else math.copysign(a, v)
             self._obs(u_prev, y); u_prev = u
             R = self.RPM
-            self.cola.append("D,%d,%.1f,%.2f,%.2f,%.2f,%.1f,%.2f,%.1f,%.2f,%.1f,%.4g,%.4g,%.4g,%.4g,%.4g,%.4f" % (
-                t * 1000, duty * 100, u, y / R, self.xl[1] / R, self.xl[0] * 1000, self.xp[1] / R, self.xp[0] * 1000,
-                self.xk[1] / R, self.xk[0] * 1000, self.Pk[0][0] * 1e6, self.Pk[1][1] / R ** 2, self.Pm[0][0] * 1e6,
-                self.Pm[1][1] / R ** 2, self.K[0] * 1000 * R, self.K[1]))
+            n_muestra = getattr(self, "n_muestra", 0) + 1
+            self.n_muestra = n_muestra
+            if n_muestra % 2 == 0:                                # como el ESP32: una línea cada 20 ms
+                self.cola.append("D,%d,%.1f,%.2f,%.2f,%.2f,%.1f,%.2f,%.1f,%.2f,%.1f,%.4g,%.4g,%.4g,%.4g,%.4g,%.4f" % (
+                    t * 1000, duty * 100, u, y / R, self.xl[1] / R, self.xl[0] * 1000, self.xp[1] / R, self.xp[0] * 1000,
+                    self.xk[1] / R, self.xk[0] * 1000, self.Pk[0][0] * 1e6, self.Pk[1][1] / R ** 2, self.Pm[0][0] * 1e6,
+                    self.Pm[1][1] / R ** 2, self.K[0] * 1000 * R, self.K[1]))
             t += 0.01
             t_real += 0.01
             time.sleep(max(0.0, t_real - time.monotonic()))
@@ -152,7 +155,7 @@ def buscar_puerto():
 def main():
     ap = argparse.ArgumentParser(description="Lab 4: observadores del motor 1 (ESP32)")
     ap.add_argument("--port", help="puerto serie: COM5 en Windows, /dev/ttyUSB0 en Linux (por defecto lo busca solo)")
-    ap.add_argument("--baud", type=int, default=230400)
+    ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--demo", action="store_true", help="sin robot: motor simulado")
     a = ap.parse_args()
 
