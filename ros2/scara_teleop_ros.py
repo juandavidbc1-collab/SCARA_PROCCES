@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Panel de control del SCARA sobre ROS 2 (micro-ROS): teclado con dead-man + todo lo del monitor serie.
+Panel de control SENCILLO del SCARA sobre ROS 2 (micro-ROS): teclado con dead-man + todo lo del monitor serie.
+
+>>> El panel principal ahora es ros2/scara_panel.py (gráficas de observadores, motores, potencia manual).
+    Este se conserva como respaldo liviano: solo necesita python3-tk.
 
 TECLADO (con el foco en la ventana, no en un cuadro de texto):
     ESPACIO (mantener)  DEAD-MAN: sin él las flechas no mueven nada
@@ -119,7 +122,7 @@ def make_node(rclpy_mod):
 
 
 # ---------------------------------------------------------------- 1) panel Tk
-MODES = ["OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT"]
+MODES = ["OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT", "POWER"]
 GAIN_RE = re.compile(r"J([12]) kp=(-?[\d.]+) ki=(-?[\d.]+) kd=(-?[\d.]+) kff=(-?[\d.]+) fric=(-?[\d.]+)")
 GAIN_NAMES = ("kp", "ki", "kd", "kff", "fric")
 

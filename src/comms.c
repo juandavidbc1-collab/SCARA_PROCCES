@@ -13,6 +13,7 @@
 #include "hal.h"
 #include "kinematics.h"
 #include "motion.h"
+#include "uros_cmd.h"
 
 #define RAD2DEG (180.0f / (float)M_PI)
 #define DEG2RAD ((float)M_PI / 180.0f)
@@ -77,7 +78,11 @@ static void print_help(void)
            "  pulse j                 pulso corto para comprobar el sentido del motor j\n"
            "  tele 1 | tele 0         telemetria en vivo (cualquier tecla la detiene)\n"
            "  status | sens | cfg     estado | sensores en vivo | configuracion\n"
-           "  fmt 1 | fmt 0           modo maquina (lo usa teleop.py) | modo texto\n");
+           "  fmt 1 | fmt 0           modo maquina (lo usa teleop.py) | modo texto\n"
+           "  motor j on|off | motors  habilitar/deshabilitar motores (1, 2, 3) | ver cuales estan activos\n"
+           "  p dm a b c              latido de potencia manual: dead-man y %% de PWM de M1 M2 M3\n"
+           "  est [j] | est reset     observadores (Luenberger + Kalman) | reiniciarlos\n"
+           "  luen j re im | kal j si sw sy | vmap g v0   sintonia de los observadores\n");
 }
 
 static const char *si_no(bool b) { return b ? "si" : "no"; }
@@ -159,6 +164,7 @@ static void procesar(char *l)
 
     int dm, a, b, j; float x, y, z, f[5];
     if (sscanf(l, "d %d %d %d", &dm, &a, &b) == 3) { ctl_cmd_jog(dm != 0, a, b); return; }
+    if (sscanf(l, "p %d %f %f %f", &dm, &f[0], &f[1], &f[2]) == 4) { ctl_cmd_power(dm != 0, f); return; }
     if (!strncmp(l, "home", 4)) { ctl_cmd_home(); return; }
     if (sscanf(l, "goto %f %f %f", &x, &y, &z) == 3) { cmd_goto(x, y, z); return; }
     if (sscanf(l, "goto %f %f", &x, &y) == 2) { cmd_goto(x, y, Z_FIJO_MM); return; }
@@ -198,6 +204,10 @@ static void procesar(char *l)
     if (!strncmp(l, "cfg", 3)) { print_cfg(); return; }
     if (!strncmp(l, "menu", 4) || !strcmp(l, "m")) { print_menu(); return; }
     if (!strncmp(l, "help", 4) || *l == '?') { print_help(); return; }
+    {   /* motores, observadores y el resto de comandos compartidos con ROS 2 */
+        char r[200];
+        if (uros_cmd_exec(l, r, sizeof r) || strncmp(r, "#ERROR: comando desconocido", 27)) { printf("%s\n", r); return; }
+    }
     printf("#ERROR: comando desconocido '%s'. Escribe m (menu) o help.\n", l);
 }
 

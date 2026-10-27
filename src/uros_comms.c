@@ -9,10 +9,13 @@
  *     /scara/jog           geometry_msgs/Vector3    x = dead-man (>0.5), y = dir J1, z = dir J2  (-1/0/+1)
  *                          best-effort. Publicar a 25 Hz MIENTRAS se mantiene el dead-man.
  *     /scara/cmd           std_msgs/String          "home", "stop", "off", "clear", "ang a b", "elbow +1",
- *                                                    "gain ...", "pulse 1", "status", "help" (ver uros_cmd.h)
+ *                                                    "gain ...", "pulse 1", "motor 3 on", "luen ...", "kal ...", "help"
+ *     /scara/power         std_msgs/Float32MultiArray  [dead-man, %M1, %M2, %M3]  potencia manual en lazo abierto
+ *                          best-effort. Publicar a 25 Hz MIENTRAS se mantiene el dead-man (% de PWM con signo).
  *
  *   Publicaciones (ESP32 -> PC)
  *     /scara/state         std_msgs/Float32MultiArray   20 Hz, best-effort. Ver STATE_* abajo.
+ *     /scara/obs           std_msgs/Float32MultiArray   20 Hz, best-effort. Observadores de los 3 motores (OBS_* abajo).
  *     /scara/ee_position   geometry_msgs/Point          20 Hz, best-effort. Posición medida del efector [mm].
  *     /scara/event         std_msgs/String              "#LLEGO ...", "#HOME ...", "#ERROR ...", "#FALLA ..."
  *
@@ -59,13 +62,22 @@
 #define NODE_NAME      "scara_esp32"
 #define NODE_NS        "scara"
 #define STATE_PERIOD_MS 50                  /* 20 Hz */
-#define N_HANDLES      4                    /* 3 suscripciones + 1 temporizador */
+#define N_HANDLES      5                    /* 4 suscripciones + 1 temporizador */
 
-/* Índices de /scara/state (Float32MultiArray) */
+/* Índices de /scara/state (Float32MultiArray). Los 13 primeros son los de siempre (compatibles). */
 enum { STATE_Q1_DEG = 0, STATE_Q2_DEG, STATE_X, STATE_Y, STATE_MODE, STATE_FAULT, STATE_HOMED1, STATE_HOMED2,
-       STATE_FC_BITS, STATE_QREF1_DEG, STATE_QREF2_DEG, STATE_DUTY1, STATE_DUTY2, STATE_N };
+       STATE_FC_BITS, STATE_QREF1_DEG, STATE_QREF2_DEG, STATE_DUTY1, STATE_DUTY2,
+       STATE_ENABLED, STATE_DUTY3, STATE_POWER_ON, STATE_W1_RPM, STATE_W2_RPM, STATE_W3_RPM, STATE_N };
 
-/* modo: 0 OFF, 1 HOMING, 2 HOLD, 3 MOVE, 4 JOG, 5 PULSE, 6 FAULT  (ctl_mode_t) */
+/* modo: 0 OFF, 1 HOMING, 2 HOLD, 3 MOVE, 4 JOG, 5 PULSE, 6 FAULT, 7 POWER  (ctl_mode_t) */
+
+/* /scara/obs: [secuencia, banderas, luego OD_STRIDE datos por motor (M1, M2, M3)].
+ * banderas: bit m = diseño válido del motor m; bit (m+3) = el motor m tiene encoder (medida). */
+enum { OD_W_MEAS_RPM = 0, OD_WL_RPM, OD_WKPRI_RPM, OD_WK_RPM, OD_IL_A, OD_IKPRI_A, OD_IK_A,
+       OD_SIG_I_A, OD_SIG_W_RPM, OD_KW, OD_KI, OD_U_V, OD_STRIDE };
+#define OD_HDR 2
+#define OD_N   (OD_HDR + NM * OD_STRIDE)
+#define RADS2RPM (30.0f / (float)M_PI)
 
 #define RAD2DEG (180.0f / (float)M_PI)
 
@@ -74,13 +86,13 @@ static rcl_allocator_t       allocator;
 static rclc_support_t        support;
 static rcl_init_options_t    init_options;
 static rcl_node_t            node;
-static rcl_publisher_t       pub_state, pub_ee, pub_event;
-static rcl_subscription_t    sub_goto, sub_jog, sub_cmd;
+static rcl_publisher_t       pub_state, pub_ee, pub_event, pub_obs;
+static rcl_subscription_t    sub_goto, sub_jog, sub_cmd, sub_power;
 static rcl_timer_t           timer;
 static rclc_executor_t       executor;
 
-static std_msgs__msg__Float32MultiArray msg_state;
-static float                            state_data[STATE_N];
+static std_msgs__msg__Float32MultiArray msg_state, msg_obs, msg_power_in;
+static float                            state_data[STATE_N], obs_data[OD_N], power_buf[8];
 static geometry_msgs__msg__Point        msg_ee, msg_goto_in;
 static geometry_msgs__msg__Vector3      msg_jog_in;
 static std_msgs__msg__String            msg_event, msg_cmd_in;
@@ -88,7 +100,7 @@ static char                             event_buf[192], cmd_buf[96];
 
 enum { C_OPTS = 1 << 0, C_SUPPORT = 1 << 1, C_NODE = 1 << 2, C_PUB_STATE = 1 << 3, C_PUB_EE = 1 << 4,
        C_PUB_EVENT = 1 << 5, C_SUB_GOTO = 1 << 6, C_SUB_JOG = 1 << 7, C_SUB_CMD = 1 << 8,
-       C_TIMER = 1 << 9, C_EXEC = 1 << 10 };
+       C_TIMER = 1 << 9, C_EXEC = 1 << 10, C_PUB_OBS = 1 << 11, C_SUB_POWER = 1 << 12 };
 static unsigned created = 0;
 static volatile bool g_connected = false;
 
@@ -120,6 +132,18 @@ static void jog_cb(const void *in)
 {
     const geometry_msgs__msg__Vector3 *v = (const geometry_msgs__msg__Vector3 *)in;
     ctl_cmd_jog(v->x > 0.5, sgn(v->y), sgn(v->z));
+}
+
+static void power_cb(const void *in)
+{
+    const std_msgs__msg__Float32MultiArray *a = (const std_msgs__msg__Float32MultiArray *)in;
+    float pct[NM] = { 0 };
+    bool dm = false;
+    if (a->data.data && a->data.size >= 1) {
+        dm = a->data.data[0] > 0.5f;
+        for (int m = 0; m < NM && (size_t)(m + 1) < a->data.size; m++) pct[m] = a->data.data[m + 1];
+    }
+    ctl_cmd_power(dm, pct);
 }
 
 static void cmd_cb(const void *in)
@@ -159,7 +183,37 @@ static void timer_cb(rcl_timer_t *t, int64_t last_call_time)
     state_data[STATE_QREF2_DEG] = s.qref[1] * RAD2DEG;
     state_data[STATE_DUTY1]     = s.duty[0];
     state_data[STATE_DUTY2]     = s.duty[1];
+    state_data[STATE_ENABLED]   = (float)s.enabled;
+    state_data[STATE_DUTY3]     = s.duty[M_TOOL];
+    state_data[STATE_POWER_ON]  = s.power_on ? 1.0f : 0.0f;
+    state_data[STATE_W1_RPM]    = s.qd[0] * RADS2RPM;
+    state_data[STATE_W2_RPM]    = s.qd[1] * RADS2RPM;
+    state_data[STATE_W3_RPM]    = s.qd[M_TOOL] * RADS2RPM;
     (void)rcl_publish(&pub_state, &msg_state, NULL);
+
+    obs_snap_t o[NM]; uint32_t seq;
+    ctl_get_obs(o, &seq);
+    unsigned flags = 0;
+    obs_data[0] = (float)(seq & 0xFFFFFF);
+    for (int m = 0; m < NM; m++) {
+        float *d = &obs_data[OD_HDR + m * OD_STRIDE];
+        d[OD_W_MEAS_RPM] = o[m].w_meas * RADS2RPM;
+        d[OD_WL_RPM]     = o[m].wL * RADS2RPM;
+        d[OD_WKPRI_RPM]  = o[m].wKp * RADS2RPM;
+        d[OD_WK_RPM]     = o[m].wK * RADS2RPM;
+        d[OD_IL_A]       = o[m].iL;
+        d[OD_IKPRI_A]    = o[m].iKp;
+        d[OD_IK_A]       = o[m].iK;
+        d[OD_SIG_I_A]    = o[m].sig_i;
+        d[OD_SIG_W_RPM]  = o[m].sig_w * RADS2RPM;
+        d[OD_KW]         = o[m].Kw;
+        d[OD_KI]         = o[m].Ki;
+        d[OD_U_V]        = o[m].u;
+        if (o[m].ok)  flags |= 1u << m;
+        if (o[m].med) flags |= 1u << (m + 3);
+    }
+    obs_data[1] = (float)flags;
+    (void)rcl_publish(&pub_obs, &msg_obs, NULL);
 
     msg_ee.x = x; msg_ee.y = y; msg_ee.z = Z_FIJO_MM;
     (void)rcl_publish(&pub_ee, &msg_ee, NULL);
@@ -196,6 +250,8 @@ static bool create_entities(void)
     created |= C_PUB_EE;
     RC(rclc_publisher_init_default(&pub_event, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), "event"));
     created |= C_PUB_EVENT;
+    RC(rclc_publisher_init_best_effort(&pub_obs, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray), "obs"));
+    created |= C_PUB_OBS;
 
     RC(rclc_subscription_init_default(&sub_goto, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Point), "goto"));
     created |= C_SUB_GOTO;
@@ -203,6 +259,8 @@ static bool create_entities(void)
     created |= C_SUB_JOG;
     RC(rclc_subscription_init_default(&sub_cmd, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String), "cmd"));
     created |= C_SUB_CMD;
+    RC(rclc_subscription_init_best_effort(&sub_power, &node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray), "power"));
+    created |= C_SUB_POWER;
 
     timer = rcl_get_zero_initialized_timer();
     RC(rclc_timer_init_default2(&timer, &support, RCL_MS_TO_NS(STATE_PERIOD_MS), timer_cb, true));
@@ -215,6 +273,7 @@ static bool create_entities(void)
     RC(rclc_executor_add_subscription(&executor, &sub_goto, &msg_goto_in, &goto_cb, ON_NEW_DATA));
     RC(rclc_executor_add_subscription(&executor, &sub_jog, &msg_jog_in, &jog_cb, ON_NEW_DATA));
     RC(rclc_executor_add_subscription(&executor, &sub_cmd, &msg_cmd_in, &cmd_cb, ON_NEW_DATA));
+    RC(rclc_executor_add_subscription(&executor, &sub_power, &msg_power_in, &power_cb, ON_NEW_DATA));
     return true;
 }
 
@@ -227,9 +286,11 @@ static void destroy_entities(void)
     }
     if (created & C_EXEC)      (void)rclc_executor_fini(&executor);
     if (created & C_TIMER)     (void)rcl_timer_fini(&timer);
+    if (created & C_SUB_POWER) (void)rcl_subscription_fini(&sub_power, &node);
     if (created & C_SUB_CMD)   (void)rcl_subscription_fini(&sub_cmd, &node);
     if (created & C_SUB_JOG)   (void)rcl_subscription_fini(&sub_jog, &node);
     if (created & C_SUB_GOTO)  (void)rcl_subscription_fini(&sub_goto, &node);
+    if (created & C_PUB_OBS)   (void)rcl_publisher_fini(&pub_obs, &node);
     if (created & C_PUB_EVENT) (void)rcl_publisher_fini(&pub_event, &node);
     if (created & C_PUB_EE)    (void)rcl_publisher_fini(&pub_ee, &node);
     if (created & C_PUB_STATE) (void)rcl_publisher_fini(&pub_state, &node);
@@ -248,6 +309,16 @@ static void prepare_static_messages(void)
     msg_state.data.data = state_data;
     msg_state.data.size = STATE_N;
     msg_state.data.capacity = STATE_N;
+
+    memset(&msg_obs, 0, sizeof msg_obs);
+    msg_obs.data.data = obs_data;
+    msg_obs.data.size = OD_N;
+    msg_obs.data.capacity = OD_N;
+
+    memset(&msg_power_in, 0, sizeof msg_power_in);
+    msg_power_in.data.data = power_buf;
+    msg_power_in.data.size = 0;
+    msg_power_in.data.capacity = sizeof power_buf / sizeof power_buf[0];
 
     memset(&msg_cmd_in, 0, sizeof msg_cmd_in);
     msg_cmd_in.data.data = cmd_buf;
@@ -302,6 +373,7 @@ static void uros_task(void *arg)
 
         case ST_DISCONNECTED:
             ctl_cmd_jog(false, 0, 0);                                    /* sin PC no hay movimiento manual */
+            ctl_cmd_power(false, NULL);
             destroy_entities();
             st = ST_WAIT_AGENT;
             break;

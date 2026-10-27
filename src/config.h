@@ -14,7 +14,14 @@
 #include "driver/gpio.h"
 #include "kinematics.h"
 
-#define NJ 2                       /* articulaciones controladas: eslabón 1 y eslabón 2 */
+#define NJ 2                       /* articulaciones del brazo (posición): eslabón 1 y eslabón 2 */
+#define NM 3                       /* motores en la tarjeta: M1 = J1, M2 = J2, M3 = atornillador (herramienta) */
+#define M_TOOL 2                   /* índice del motor 3 (atornillador): sin finales de carrera ni Home */
+
+/* Motores habilitados al arrancar (bit m = motor m+1). Se cambian en vivo con "motor j on|off".
+ * Un motor deshabilitado queda libre (IN1 = IN2 = 0): no recibe PWM, no entra al PID, al Home ni a la
+ * supervisión de fallas. Su encoder sigue contando, así que no pierde la referencia si lo mueves a mano. */
+#define MOTORES_HABILITADOS_INIT  0x03   /* M1 y M2 sí, M3 no */
 
 /* ------------------------------------------------------------------ PINES */
 #define PIN_STBY      GPIO_NUM_17  /* habilita U5/U6; R10 lo mantiene en 0 al arrancar */
@@ -25,11 +32,16 @@
 #define PIN_M2_PWM    GPIO_NUM_19
 #define PIN_M2_IN1    GPIO_NUM_5
 #define PIN_M2_IN2    GPIO_NUM_18
-/* Motor 3 (atornillador): NO se usa por ahora. Sus pines se dejan como salidas en 0 para que
- * las entradas de U6 no queden flotando. */
+/* Motor 3 (atornillador): canal B de U6. Arranca deshabilitado (MOTORES_HABILITADOS_INIT). */
 #define PIN_M3_PWM    GPIO_NUM_21
 #define PIN_M3_IN1    GPIO_NUM_23
 #define PIN_M3_IN2    GPIO_NUM_22
+/* Encoder del motor 3 (conector J8). [CAMBIAR] confirma los GPIO con el esquema de la tarjeta.
+ * Se eligieron pines libres que NO son de arranque (evita 0, 2, 12 y 15). Si el motor 3 no tiene encoder
+ * conectado pon M3_TIENE_ENCODER 0: su observador funciona solo con el modelo (sin corrección). */
+#define M3_TIENE_ENCODER 1
+#define PIN_ENC3_A    GPIO_NUM_32
+#define PIN_ENC3_B    GPIO_NUM_14
 
 #define PIN_ENC1_A    GPIO_NUM_33
 #define PIN_ENC1_B    GPIO_NUM_25
@@ -66,6 +78,15 @@ typedef struct {
     float kp, ki, kd, kff, fric;   /* ver pid.h */
 } joint_cfg_t;
 extern const joint_cfg_t JC[NJ];
+
+/* Motor 3 (herramienta): solo potencia manual en lazo abierto + observadores. */
+typedef struct {
+    const char *name;
+    gpio_num_t pwm, in1, in2, enc_a, enc_b;
+    int   enc_sign, motor_sign;
+    float k;             /* cuentas de encoder por radian del eje de salida */
+} tool_cfg_t;
+extern const tool_cfg_t TOOL;
 
 /* Pololu 37D: 64 cuentas por vuelta del motor (x4) con reductor ~100.37:1 */
 #define ENC_CUENTAS_SALIDA   6424.0f
@@ -123,3 +144,51 @@ extern const joint_cfg_t JC[NJ];
 #define PULSE_MS          350
 
 #define TELE_PERIODO_MS   100
+
+/* ------------------------------------------------------------------ POTENCIA MANUAL (lazo abierto)
+ * /scara/power = [dead-man, %M1, %M2, %M3]. El PWM pedido se limita a DUTY_MAX (~63 %) y pasa por la
+ * misma rampa. Si un eje del brazo tiene 0 %, se queda en HOLD con su PID; los que tienen potencia van
+ * en lazo abierto. Sin latidos frescos (DEADMAN_TIMEOUT_MS) todo vuelve a 0 y el brazo a HOLD.
+ * Sigue prohibido empujar contra un final de carrera y, con Home hecho, salir de los límites. */
+#define POWER_STALL_FALLA  1         /* 1 = en potencia manual también vigila "motor trabado" en J1/J2 */
+
+/* ------------------------------------------------------------------ MODELO DEL MOTOR (identificado)
+ * Laboratorio 4 de Control Digital (Pololu 37D 12 V 100:1): parámetros ajustados para que a 12 V el
+ * motor dé 0,2 A y 114,3 rpm, y con la dinámica medida (tau dominante ~0,108 s). Están referidos al EJE
+ * DE SALIDA del reductor (= la articulación), así no dependen de si la caja es 100,37:1 o 102,08:1:
+ *    La di/dt = V - Ra i - Kv w        J dw/dt = Kv i - B w          (w en rad/s del eje de salida)
+ *  Kv = 1,6369e-3 V s/rad (lado motor) x 102,08  ;  B = 2,6793e-7 x 102,08^2  ;  J = 3,4858e-8 x 102,08^2 */
+#define MOT_RA     50.0f          /* [ohm]  (medido) */
+#define MOT_LA     0.060f         /* [H]    (medido) */
+#define MOT_KV     0.167092f      /* [V s/rad] constante contraelectromotriz en el eje de salida */
+#define MOT_B      2.79197e-3f    /* [N m s/rad] fricción viscosa en el eje de salida */
+#define MOT_J      3.63232e-4f    /* [kg m^2] inercia en el eje de salida (motor solo, sin eslabón) */
+#define VBUS       12.0f          /* [V] alimentación de los motores */
+
+/* Voltaje que de verdad recibe el motor:  V = OBS_VGAIN * (VBUS * duty) - signo * OBS_V0   (0 si |.| < OBS_V0)
+ * En el laboratorio, con L298N, se midió  V = 0,9782 (12 duty) - 1,197 V  (caída del puente bipolar + zona
+ * muerta). La tarjeta usa TB6612 (MOSFET), que casi no tiene caída: queda la zona muerta por fricción seca,
+ * ~0,8 V (equivale al "fric" = 70 del PID). Si usas un L298N pon OBS_DRIVER_L298N 1.
+ * Se cambia en vivo con el comando "vmap <ganancia> <v0>". */
+#define OBS_DRIVER_L298N 0
+#if OBS_DRIVER_L298N
+#define OBS_VGAIN  0.9782f
+#define OBS_V0     1.197f
+#else
+#define OBS_VGAIN  1.0f
+#define OBS_V0     0.8f
+#endif
+
+/* ------------------------------------------------------------------ OBSERVADORES (Luenberger + Kalman)
+ * Corren a 100 Hz (cada OBS_DIV ticks del lazo de 1 kHz), igual que en el laboratorio (Ts = 10 ms), con
+ * la velocidad medida como diferencia de cuentas del encoder en 10 ms. Miden SOLO la velocidad y estiman
+ * velocidad y corriente. Se cambian en vivo con "luen" y "kal" (ver uros_cmd.h). */
+#define OBS_DIV          10
+#define OBS_TS           (OBS_DIV / (float)CONTROL_HZ)
+#define OBS_POLO_RE      0.25f    /* polos del Luenberger: 0,25 +/- 0,25j (los del laboratorio) */
+#define OBS_POLO_IM      0.25f
+#define OBS_SIG_I        0.010f   /* Kalman, Q: incertidumbre del modelo en la corriente [A]  (10 mA) */
+#define OBS_SIG_W_RPM    0.30f    /* Kalman, Q: incertidumbre del modelo en la velocidad [rpm] */
+#define OBS_SIG_Y_RPM    0.81f    /* Kalman, R: ruido de la medición [rpm]  (R = 0,655 rpm^2 medido en el lab) */
+#define OBS_P0_I         0.10f    /* Kalman, P0: incertidumbre inicial [A] y [rpm] */
+#define OBS_P0_W_RPM     1.0f

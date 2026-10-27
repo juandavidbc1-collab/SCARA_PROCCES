@@ -26,7 +26,17 @@ bool ctl_cmd_pulse(int j) { n_pulse++; return j == 0 || j == 1; }
 bool ctl_cmd_move(const float q[2], const float t[3]) { (void)t; n_move++; last_q[0] = q[0]; last_q[1] = q[1]; return true; }
 void ctl_cmd_jog(bool a, int b, int c) { (void)a; (void)b; (void)c; }
 bool ctl_cmd_gain(int j, float a, float b, float c, float d, float e) { (void)j; (void)a; (void)b; (void)c; (void)d; (void)e; return true; }
-const char *ctl_mode_str(ctl_mode_t m) { static const char *s[] = { "OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT" }; return s[m]; }
+const char *ctl_mode_str(ctl_mode_t m) { static const char *s[] = { "OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT", "POWER" }; return s[m]; }
+static uint8_t g_en = 0x3; static int n_power; static float last_pct[3]; static bool last_pdm;
+uint8_t ctl_get_enabled(void) { return g_en; }
+bool ctl_cmd_enable(int m, bool on) { if (m < 0 || m > 2) return false; if (on) g_en |= 1u << m; else g_en &= ~(1u << m); return true; }
+void ctl_cmd_power(bool dm, const float p[3]) { n_power++; last_pdm = dm; for (int i = 0; i < 3; i++) last_pct[i] = p[i]; }
+void ctl_cmd_est_reset(void) {}
+bool ctl_cmd_luen(int m, float re, float im) { (void)m; (void)re; (void)im; return true; }
+bool ctl_cmd_kal(int m, float a, float b, float c) { (void)m; (void)a; (void)b; (void)c; return true; }
+bool ctl_cmd_vmap(float g, float v0) { (void)g; (void)v0; return true; }
+void ctl_get_est(int m, est_params_t *p, float L[2], bool *ok) { (void)m; memset(p, 0, sizeof *p); L[0] = L[1] = 0; *ok = true; }
+void ctl_get_vmap(float *g, float *v0) { *g = 1.0f; *v0 = 0.8f; }
 const char *ctl_fault_str(fault_t f) { (void)f; return "ninguna"; }
 bool ctl_event_pop(char *b, size_t n_, uint32_t w) { (void)b; (void)n_; (void)w; return false; }
 bool hal_stby_get(void) { return false; }
@@ -96,7 +106,13 @@ int main(void)
     tipea("d 1 1 0\n");
     tipea("fmt 0\n"); CHECK(!g_csv, "modo texto otra vez");
 
-    marca("13) menu y ayuda");
+    marca("13) comandos compartidos con ROS 2: motores y potencia manual");
+    tipea("motor 3 on\r"); CHECK(g_en == 0x7, "motor 3 on (desde el modo texto)");
+    tipea("fmt 1\r"); tipea("p 1 10 -5 30\n"); tipea("fmt 0\n");
+    CHECK(n_power == 1 && last_pdm && last_pct[0] == 10 && last_pct[1] == -5 && last_pct[2] == 30, "latido de potencia 'p 1 10 -5 30'");
+    tipea("pulse 1\r"); CHECK(n_pulse >= 1, "pulse sigue funcionando (no lo confunde con 'p')");
+
+    marca("14) menu y ayuda");
     tipea("m\r"); tipea("help\r"); tipea("cfg\r");
 
     printf(fallos ? "\n%d FALLOS\n" : "\nTODO OK\n", fallos);

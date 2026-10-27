@@ -36,7 +36,7 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=2
 """
 
 # Límites de entidades de micro-ROS. La base (colcon.meta del componente) permite 2 publicadores y
-# 2 suscriptores; este nodo usa 3 publicadores y 3 suscriptores.
+# 2 suscriptores; este nodo usa 4 publicadores (state, ee_position, event, obs) y 4 suscriptores (goto, jog, cmd, power).
 COLCON_COMMON = """\
         "-DRMW_UXRCE_MAX_NODES=1",
         "-DRMW_UXRCE_MAX_PUBLISHERS=4",
