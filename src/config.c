@@ -19,7 +19,9 @@ const kin_cfg_t KIN = { .l1 = 120.0f, .l2 = 70.0f, .sing_margin = DEG(5.0f) };
  *   Verificado en simulación (tools/host_tests/sim_pid.c) con el modelo identificado y con el de la hoja de datos.
  * GANANCIAS_DEL_MODELO = 0: las que se usaron en el Reporte 3 (simulación con el modelo de la hoja de datos):
  *   kp = 5000, ki = 3000, kd = 180, kff = 80, fric = 70.  Sirven de respaldo si las nuevas no te convencen.
- * En vivo: comando "gain j kp ki kd kff fric".
+ * J2 (eslabón 2) usa SIEMPRE las del Reporte 3: en el robot, con las del modelo, el eslabón 2 (liviano) quedó muy
+ * agresivo (ki 6 veces mayor -> el PWM sube mucho y busca la posición). Para probar otras: GANANCIAS_J2_REPORTE3 0.
+ * En vivo: comando "gain j kp ki kd kff fric" (o la pestaña Sintonía del panel).
  *
  * Límites, q_home y signos son PROVISIONALES: [CAMBIAR] tras medir el robot.
  *   - q_home: ángulo del eslabón justo cuando se libera el final de carrera de Home.
@@ -38,6 +40,19 @@ const kin_cfg_t KIN = { .l1 = 120.0f, .l2 = 70.0f, .sing_margin = DEG(5.0f) };
 #define G_KFF 80.0f
 #endif
 #define G_FRIC 70.0f
+
+#define GANANCIAS_J2_REPORTE3 1
+#if GANANCIAS_J2_REPORTE3
+#define G2_KP 5000.0f
+#define G2_KI 3000.0f
+#define G2_KD 180.0f
+#define G2_KFF 80.0f
+#else
+#define G2_KP G_KP
+#define G2_KI G_KI
+#define G2_KD G_KD
+#define G2_KFF G_KFF
+#endif
 
 const joint_cfg_t JC[NJ] = {
     {
@@ -59,7 +74,7 @@ const joint_cfg_t JC[NJ] = {
         .k = K_RAD(RELACION_EXTRA_J2),
         .q_min = DEG(-140.0f), .q_max = DEG(140.0f), .q_home = DEG(-143.0f), .home_dir = -1,
         .vmax = DEG(60.0f), .amax = DEG(120.0f), .jog_v = DEG(30.0f),
-        .kp = G_KP, .ki = G_KI, .kd = G_KD, .kff = G_KFF, .fric = G_FRIC,
+        .kp = G2_KP, .ki = G2_KI, .kd = G2_KD, .kff = G2_KFF, .fric = G_FRIC,
     },
 };
 

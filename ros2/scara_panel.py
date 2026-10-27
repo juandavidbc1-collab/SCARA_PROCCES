@@ -193,7 +193,7 @@ class DemoBridge:
         self.qdref = [0.0, 0.0]
         self.integ = [0.0, 0.0]
         self.duty = [0.0, 0.0, 0.0]
-        self.gains = [[5350, 18500, 295, 85, 70] for _ in range(2)]
+        self.gains = [[5350, 18500, 295, 85, 70], [5000, 3000, 180, 80, 70]]
         self.vgain, self.v0 = 1.0, 0.8
         self.est = [sc.Estimator() for _ in range(sc.NM)]
         self.cnt_prev = [math.floor(t / (2 * math.pi) * 6424) for t in self.th]
@@ -1073,8 +1073,9 @@ class Panel(QtWidgets.QMainWindow):
         br = button("Leer del robot")
         br.clicked.connect(lambda: self.send("gain"))
         l1.addWidget(br, 2, 7, 2, 1)
-        l1.addWidget(label("Diseño con el modelo identificado: kp 5350 · ki 18500 · kd 295 · kff 85 · fric 70  "
-                           "(respaldo del Reporte 3: 5000 · 3000 · 180 · 80 · 70). Los cambios se pierden al reiniciar.", "muted"), 4, 0, 1, 8)
+        l1.addWidget(label("Por defecto: J1 con el modelo identificado (5350 · 18500 · 295 · 85 · 70); J2 con las del Reporte 3 "
+                           "(5000 · 3000 · 180 · 80 · 70), porque con las del modelo el eslabón 2 quedaba muy agresivo. "
+                           "Si un eje vibra o busca la posición, baja primero ki y luego kd. Los cambios se pierden al reiniciar.", "muted"), 4, 0, 1, 8)
         outer.addWidget(f1)
         # observadores
         f2 = card()
