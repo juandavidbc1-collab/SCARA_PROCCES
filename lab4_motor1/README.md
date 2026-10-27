@@ -53,7 +53,7 @@ python3 lab4_panel.py            # o --port /dev/ttyUSB0
 
 ## Datos que manda el ESP32
 
-Una línea cada 10 ms, a 230400 baudios:
+Una línea cada 20 ms (los observadores calculan cada 10 ms; se envía una de cada dos muestras), a 115200 baudios:
 
 ```
 D,t_ms,PWM_%,V,w_medida,w_L,i_L,w_Kpri,i_Kpri,w_K,i_K,P11,P22,P11_pri,P22_pri,K1,K2

@@ -3,7 +3,8 @@
  *
  *   - Lazo de 1 kHz: aplica el PWM pedido (con rampa) y vigila topes y motor trabado.
  *   - Cada 10 ms (Ts del laboratorio): velocidad medida por el encoder, Luenberger y Kalman.
- *   - Por el puerto serie (230400 baudios) manda una línea por muestra; lab4_panel.py la grafica.
+ *   - Por el puerto serie (115200 baudios) manda una línea cada 20 ms (una de cada 2 muestras); lab4_panel.py la grafica.
+ *     Los observadores corren igual cada 10 ms; solo se envía la mitad para no saturar el puerto.
  *
  * Órdenes por el puerto serie (las manda lab4_panel.py):
  *   p <porcentaje>   PWM de -100 a 100 (0 = parar)
@@ -28,6 +29,9 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#define BAUD         115200
+#define ENVIAR_CADA  2                /* muestras: 2 -> una línea cada 20 ms */
 
 /* ------------------------------------------------------------------ pines de la tarjeta (config.h del robot) */
 #define PIN_STBY     GPIO_NUM_17
@@ -263,6 +267,10 @@ static void tarea_serial(void *arg)
 }
 
 /* ------------------------------------------------------------------ lazo de 1 kHz */
+/* El ritmo lo da un temporizador de hardware de 1 ms (no depende del tick de FreeRTOS). */
+static TaskHandle_t h_control;
+static void cada_ms(void *arg) { (void)arg; xTaskNotifyGive(h_control); }
+
 static void tarea_control(void *arg)
 {
     (void)arg;
@@ -271,11 +279,16 @@ static void tarea_control(void *arg)
     int ms_trab = 0;
     float u_prev = 0.0f;
     int64_t t0 = esp_timer_get_time();
-    TickType_t tick = xTaskGetTickCount();
+    int envio = 0;
+    h_control = xTaskGetCurrentTaskHandle();
     obs_reset(&O);
+    esp_timer_handle_t tmr;
+    esp_timer_create_args_t ta = { .callback = cada_ms, .arg = NULL, .name = "1ms" };
+    ESP_ERROR_CHECK(esp_timer_create(&ta, &tmr));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(tmr, 1000));
 
     for (;;) {
-        vTaskDelayUntil(&tick, 1);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         /* orden del PC (0 si dejó de llegar) */
         int64_t ahora = esp_timer_get_time();
@@ -332,6 +345,8 @@ static void tarea_control(void *arg)
         suma = 0;
         obs_paso(&O, u_prev, y);
         u_prev = u;
+        if (++envio < ENVIAR_CADA) continue;
+        envio = 0;
 
         /* D,t[ms],PWM[%],V,w_med,w_L,i_L,w_Kpri,i_Kpri,w_K,i_K,P11+,P22+,P11-,P22-,K1,K2
          * velocidades en rpm, corrientes en mA, P de corriente en mA^2, P de velocidad en rpm^2, K1 en mA/rpm */
@@ -347,7 +362,8 @@ void app_main(void)
 {
     hw_init();
     uart_driver_install(UART_NUM_0, 1024, 4096, 0, NULL, 0);
+    uart_set_baudrate(UART_NUM_0, BAUD);
     enviar("\n#LAB4: motor 1, Luenberger + Kalman, Ts = 10 ms. Ordenes: 'p <-100..100>' y 'r'\n");
     xTaskCreatePinnedToCore(tarea_serial, "serial", 3072, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(tarea_control, "control", 4096, NULL, 10, NULL, 1);
+    xTaskCreatePinnedToCore(tarea_control, "control", 4096, NULL, 10, &h_control, 1);
 }
