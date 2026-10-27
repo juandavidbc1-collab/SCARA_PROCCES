@@ -37,7 +37,8 @@ Juan David Botero Cubides · Ingeniería Mecatrónica · Universidad EIA
 15. [Anexos: cinemática, protocolo de texto, caracterización](#15-anexos)
 
 > **Guías:** [`UBUNTU_MICROROS.md`](UBUNTU_MICROROS.md) (instalación paso a paso y fallos) ·
-> [`Guia_operacion_SCARA_ROS2.pdf`](Guia_operacion_SCARA_ROS2.pdf) (cómo correr el sistema en la demostración).
+> [`Guia_operacion_SCARA_ROS2.pdf`](Guia_operacion_SCARA_ROS2.pdf) (cómo correr el sistema en la demostración) ·
+> [`Justificacion_SCARA.pdf`](Justificacion_SCARA.pdf) (por qué se diseñó así, con preguntas y respuestas para la sustentación).
 
 ---
 
@@ -337,6 +338,7 @@ ESP32-DevKitC WROOM-32 · drivers TB6612FNG (SparkFun ROB-14450) · 3 motores Po
 | `tools/host_tests/` | Pruebas en el PC (`run.sh`) |
 | `tools/docs/guia_operacion.py` | Genera `Guia_operacion_SCARA_ROS2.pdf` (edita ahí y vuelve a generar) |
 | `docs/img/` | Capturas del panel |
+| `docs/justificacion/` | Fuente LaTeX de `Justificacion_SCARA.pdf` y `figuras.py` (compilar con `latexmk -xelatex`) |
 | `tools/teleop.py`, `tools/characterize.py` | Teleop por serial (modo texto) y caracterización |
 
 ## 13. Pruebas en el PC
