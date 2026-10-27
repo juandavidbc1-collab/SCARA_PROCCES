@@ -1,4 +1,4 @@
-set(srcs main.c hal.c control.c pid.c traj.c kinematics.c config.c motion.c)
+set(srcs main.c hal.c control.c pid.c traj.c kinematics.c config.c motion.c estimator.c uros_cmd.c)
 
 # Este archivo se evalúa DOS veces: primero ESP-IDF lo lee para averiguar dependencias, cuando todavía
 # NO existe el sdkconfig (CONFIG_* vacío); después, ya con la configuración. Por eso el modo se decide por
@@ -32,7 +32,7 @@ if(SCARA_UROS_MODE)
             "git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git components/micro_ros_espidf_component")
     endif()
     # ROS 2 / micro-ROS (ver tools/uros_select.py y UBUNTU_MICROROS.md)
-    list(APPEND srcs uros_comms.c uros_cmd.c uros_serial_transport.c)
+    list(APPEND srcs uros_comms.c uros_serial_transport.c)
     set(extra_requires micro_ros_espidf_component)
 else()
     # protocolo de texto por serial

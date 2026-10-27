@@ -12,15 +12,20 @@ Requisitos:  Ubuntu con ROS 2 Jazzy;  source /opt/ros/jazzy/setup.bash;  el agen
     python3 ros2/scara_client.py stop | off | clear
     python3 ros2/scara_client.py state                   imprime una muestra de /scara/state
     python3 ros2/scara_client.py monitor                 imprime eventos y posición hasta Ctrl+C
+    python3 ros2/scara_client.py motor 3 on              habilita / deshabilita un motor (1, 2 o 3)
+    python3 ros2/scara_client.py obs                     velocidad y corriente estimadas (Luenberger y Kalman)
 
 Tópicos (nodo del ESP32: /scara/...):
     /scara/goto (geometry_msgs/Point)   /scara/jog (geometry_msgs/Vector3, best-effort)
     /scara/cmd (std_msgs/String)        /scara/state (Float32MultiArray)
     /scara/ee_position (Point)          /scara/event (std_msgs/String)
+    /scara/obs (Float32MultiArray)      /scara/power (Float32MultiArray, best-effort)
 """
 import argparse
 import sys
 import time
+
+import os
 
 import rclpy
 from geometry_msgs.msg import Point
@@ -28,9 +33,12 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from std_msgs.msg import Float32MultiArray, String
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scara_common as sc  # noqa: E402
+
 STATE_FIELDS = ["q1_deg", "q2_deg", "x_mm", "y_mm", "modo", "falla", "home1", "home2", "fc_bits",
                 "qref1_deg", "qref2_deg", "duty1", "duty2"]
-MODES = ["OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT"]
+MODES = sc.MODES
 BEST_EFFORT = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=5)
 RELIABLE = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=20)
 
@@ -52,6 +60,8 @@ class ScaraClient(Node):
         self.create_subscription(String, "/scara/event", lambda m: self.events.append(m.data), RELIABLE)
         self.create_subscription(Float32MultiArray, "/scara/state", self._on_state, BEST_EFFORT)
         self.create_subscription(Point, "/scara/ee_position", self._on_ee, BEST_EFFORT)
+        self.obs = None
+        self.create_subscription(Float32MultiArray, "/scara/obs", lambda m: setattr(self, "obs", list(m.data)), BEST_EFFORT)
 
     def _on_state(self, m):
         self.state = list(m.data)
@@ -104,7 +114,7 @@ def fmt_state(s):
 
 def main():
     ap = argparse.ArgumentParser(description="Cliente ROS 2 del SCARA (micro-ROS)")
-    ap.add_argument("accion", choices=["home", "goto", "ang", "cmd", "stop", "off", "clear", "state", "monitor"])
+    ap.add_argument("accion", choices=["home", "goto", "ang", "cmd", "stop", "off", "clear", "state", "monitor", "motor", "obs"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--timeout", type=float, default=40.0, help="segundos máximos de espera del movimiento")
     a = ap.parse_args()
@@ -138,6 +148,22 @@ def main():
         elif a.accion in ("stop", "off", "clear"):
             node.send_cmd(a.accion)
             ev = node.wait_event(5.0, QUICK_DONE)
+        elif a.accion == "motor":
+            if len(a.args) != 2 or a.args[1] not in ("on", "off"):
+                ap.error("motor necesita: j on|off   (j = 1, 2 o 3)")
+            node.send_cmd("motor %s %s" % (a.args[0], a.args[1]))
+            ev = node.wait_event(5.0, QUICK_DONE + ("#MOTOR",))
+        elif a.accion == "obs":
+            node.spin_for(0.4)
+            r = sc.parse_obs(node.obs or [])
+            if not r:
+                print("No llega /scara/obs (¿firmware viejo?)", file=sys.stderr)
+                return 1
+            for m, o in enumerate(r[1]):
+                print("M%d  vel medida %7.2f | Luenberger %7.2f | Kalman %7.2f rpm   corriente Luenberger %7.1f | Kalman %7.1f mA   "
+                      "Kw %.3f  sigma_w %.2f rpm" % (m + 1, o["w_meas_rpm"], o["wL_rpm"], o["wK_rpm"], o["iL_A"] * 1000,
+                                                    o["iK_A"] * 1000, o["Kw"], o["sig_w_rpm"]))
+            return 0
         elif a.accion == "state":
             node.spin_for(0.3)
             print(fmt_state(node.state))

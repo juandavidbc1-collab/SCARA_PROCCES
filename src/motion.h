@@ -17,6 +17,7 @@ typedef enum {
     MOTION_ERR_IK,         /* inalcanzable / singular / sin solución dentro de límites */
     MOTION_ERR_LIMITES,    /* ángulo fuera de límites (goto en ángulos) */
     MOTION_ERR_COLA,       /* el lazo de control no aceptó la orden */
+    MOTION_ERR_DESHABILITADO, /* un motor del brazo necesario está deshabilitado */
 } motion_res_t;
 
 int  motion_get_elbow(void);            /* codo preferido: +1 (q2 >= 0) o -1 (q2 <= 0) */

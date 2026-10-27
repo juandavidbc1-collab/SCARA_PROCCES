@@ -23,6 +23,12 @@ motion_res_t motion_goto_xyz(float x, float y, float z, char *msg, size_t n)
 #else
     (void)z;
 #endif
+    uint8_t en = ctl_get_enabled();
+    if ((en & 0x3) != 0x3) {
+        snprintf(msg, n, "#ERROR: goto necesita J1 y J2 habilitados (M%d deshabilitado: usa 'motor %d on').",
+                 (en & 1) ? 2 : 1, (en & 1) ? 2 : 1);
+        return MOTION_ERR_DESHABILITADO;
+    }
     float qmin[2], qmax[2];
     for (int j = 0; j < NJ; j++) ctl_get_limits(j, &qmin[j], &qmax[j]);
     float q[2]; int cod = 0;
@@ -45,7 +51,13 @@ motion_res_t motion_goto_xyz(float x, float y, float z, char *msg, size_t n)
 motion_res_t motion_goto_ang(float a, float b, char *msg, size_t n)
 {
     float q[2] = { a * DEG2RAD, b * DEG2RAD };
+    uint8_t en = ctl_get_enabled();
+    if ((en & 0x3) == 0) {
+        snprintf(msg, n, "#ERROR: J1 y J2 estan deshabilitados (usa 'motor 1 on' / 'motor 2 on').");
+        return MOTION_ERR_DESHABILITADO;
+    }
     for (int j = 0; j < NJ; j++) {
+        if (!((en >> j) & 1)) continue;                 /* eje deshabilitado: se queda donde está */
         float lo, hi; ctl_get_limits(j, &lo, &hi);
         if (q[j] < lo || q[j] > hi) {
             snprintf(msg, n, "#ERROR: q%d = %.1f deg esta fuera de sus limites (%.1f a %.1f deg).", j + 1,
@@ -58,6 +70,10 @@ motion_res_t motion_goto_ang(float a, float b, char *msg, size_t n)
         snprintf(msg, n, "#ERROR: cola de ordenes llena, intenta de nuevo.");
         return MOTION_ERR_COLA;
     }
-    snprintf(msg, n, "#INFO: moviendo a q1 = %.2f deg, q2 = %.2f deg...", a, b);
+    if ((en & 0x3) != 0x3)
+        snprintf(msg, n, "#INFO: moviendo solo J%d a %.2f deg (J%d deshabilitado, no se mueve)...",
+                 (en & 1) ? 1 : 2, (en & 1) ? a : b, (en & 1) ? 2 : 1);
+    else
+        snprintf(msg, n, "#INFO: moviendo a q1 = %.2f deg, q2 = %.2f deg...", a, b);
     return MOTION_OK;
 }

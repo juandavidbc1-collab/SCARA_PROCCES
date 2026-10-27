@@ -1,8 +1,8 @@
 .pio/
 .vscode/
 build/
-sdkconfig
-sdkconfig.*
-!sdkconfig.defaults
+/sdkconfig
+/sdkconfig.*
+!/sdkconfig.defaults
 __pycache__/
 *.csv

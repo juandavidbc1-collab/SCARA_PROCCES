@@ -8,7 +8,9 @@
 #include "motion.h"
 #include "uros_cmd.h"
 
-static int n_home, n_stop, n_off, n_clear, n_move, n_pulse, n_gain;
+static int n_home, n_stop, n_off, n_clear, n_move, n_pulse, n_gain, n_est_reset;
+static uint8_t g_en = 0x3;
+static int last_luen_m = -1, last_kal_m = -1; static float last_kal[3], last_vmap[2];
 static bool accept_move = true;
 static float last_q[2], last_tgt[3];
 static int last_gain_j;
@@ -30,7 +32,15 @@ bool ctl_cmd_move(const float q[2], const float t[3])
 bool ctl_cmd_gain(int j, float a, float b, float c, float d, float e)
 { (void)a; (void)b; (void)c; (void)d; (void)e; n_gain++; last_gain_j = j; return j == 0 || j == 1; }
 void ctl_get_limits(int j, float *lo, float *hi) { *lo = JC[j].q_min; *hi = JC[j].q_max; }
-const char *ctl_mode_str(ctl_mode_t m) { static const char *s[] = { "OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT" }; return s[m]; }
+const char *ctl_mode_str(ctl_mode_t m) { static const char *s[] = { "OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT", "POWER" }; return s[m]; }
+uint8_t ctl_get_enabled(void) { return g_en; }
+bool ctl_cmd_enable(int m, bool on) { if (m < 0 || m > 2) return false; if (on) g_en |= 1u << m; else g_en &= ~(1u << m); return true; }
+void ctl_cmd_est_reset(void) { n_est_reset++; }
+bool ctl_cmd_luen(int m, float re, float im) { if (m < 0 || m > 2 || sqrtf(re * re + im * im) >= 0.999f) return false; last_luen_m = m; return true; }
+bool ctl_cmd_kal(int m, float a, float b, float c) { if (m < 0 || m > 2 || !(a > 0 && b > 0 && c > 0)) return false; last_kal_m = m; last_kal[0] = a; last_kal[1] = b; last_kal[2] = c; return true; }
+bool ctl_cmd_vmap(float g, float v0) { if (!(g > 0.3f && g < 1.5f) || !(v0 >= 0 && v0 < 6)) return false; last_vmap[0] = g; last_vmap[1] = v0; return true; }
+void ctl_get_est(int m, est_params_t *p, float L[2], bool *ok) { (void)m; memset(p, 0, sizeof *p); p->polo_re = 0.25f; p->polo_im = 0.25f; L[0] = 0.24f; L[1] = 0.41f; *ok = true; }
+void ctl_get_vmap(float *g, float *v0) { *g = 1.0f; *v0 = 0.8f; }
 const char *ctl_fault_str(fault_t f) { (void)f; return "x"; }
 
 static int fallos = 0;
@@ -81,6 +91,32 @@ int main(void)
     ok = uros_cmd_exec("help", r, sizeof r);          CHECK(ok, "help");
     ok = uros_cmd_exec("baila", r, sizeof r);         CHECK(!ok && strstr(r, "desconocido"), "comando desconocido");
     ok = uros_cmd_exec("", r, sizeof r);              CHECK(!ok, "linea vacia");
+
+    /* ---- motores ---- */
+    ok = uros_cmd_exec("motor 3 on", r, sizeof r);    CHECK(ok && g_en == 0x7, "motor 3 on");
+    ok = uros_cmd_exec("motor 2 off", r, sizeof r);   CHECK(ok && g_en == 0x5, "motor 2 off");
+    ok = uros_cmd_exec("motors", r, sizeof r);        CHECK(ok && strstr(r, "M2 off") && strstr(r, "M3 ON"), "motors muestra cuales estan activos");
+    int nm = n_move;
+    ok = uros_cmd_exec("goto 120 80", r, sizeof r);   CHECK(!ok && n_move == nm && strstr(r, "habilitados"), "goto con un eje deshabilitado se rechaza");
+    ok = uros_cmd_exec("ang 10 20", r, sizeof r);     CHECK(ok && n_move == nm + 1 && strstr(r, "solo J1"), "ang con J2 deshabilitado mueve solo J1");
+    ok = uros_cmd_exec("motors 1 1 0", r, sizeof r);  CHECK(ok && g_en == 0x3, "motors 1 1 0");
+    ok = uros_cmd_exec("motor 4 on", r, sizeof r);    CHECK(!ok, "motor 4 se rechaza");
+    ok = uros_cmd_exec("motor 1 talvez", r, sizeof r); CHECK(!ok && g_en == 0x3, "motor 1 <basura> se rechaza");
+    ok = uros_cmd_exec("status", r, sizeof r);        CHECK(ok && strstr(r, "motores:"), "status incluye los motores");
+
+    /* ---- observadores ---- */
+    ok = uros_cmd_exec("est reset", r, sizeof r);     CHECK(ok && n_est_reset == 1, "est reset");
+    ok = uros_cmd_exec("est 2", r, sizeof r);         CHECK(ok && strstr(r, "M2") && strstr(r, "L=["), "est 2 muestra el diseno");
+    ok = uros_cmd_exec("est 5", r, sizeof r);         CHECK(!ok, "est 5 se rechaza");
+    ok = uros_cmd_exec("luen 3 0.1 0.2", r, sizeof r); CHECK(ok && last_luen_m == 2, "luen 3 0.1 0.2");
+    ok = uros_cmd_exec("luen 1 0.9 0.9", r, sizeof r); CHECK(!ok, "luen con |polo| >= 1 se rechaza");
+    ok = uros_cmd_exec("kal 1 10 0.3 0.81", r, sizeof r);
+    CHECK(ok && last_kal_m == 0 && fabsf(last_kal[0] - 0.010f) < 1e-6f && fabsf(last_kal[2] - 0.81f * (float)M_PI / 30) < 1e-5f,
+          "kal 1 10 0.3 0.81 (mA y rpm -> A y rad/s)");
+    ok = uros_cmd_exec("kal 1 0 0.3 0.81", r, sizeof r); CHECK(!ok, "kal con sigma 0 se rechaza");
+    ok = uros_cmd_exec("vmap 0.978 1.197", r, sizeof r); CHECK(ok && fabsf(last_vmap[1] - 1.197f) < 1e-6f, "vmap del L298N");
+    ok = uros_cmd_exec("vmap 3 0", r, sizeof r);      CHECK(!ok, "vmap fuera de rango se rechaza");
+    ok = uros_cmd_exec("help", r, sizeof r);          CHECK(ok && strlen(r) < 200 && strstr(r, "motor"), "help cabe en el evento y lista los comandos nuevos");
 
     printf(fallos ? "\n%d FALLOS\n" : "\nTODO OK\n", fallos);
     return fallos != 0;
