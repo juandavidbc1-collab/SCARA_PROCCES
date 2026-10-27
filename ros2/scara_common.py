@@ -187,3 +187,38 @@ def voltaje(duty_frac, vbus=12.0, vgain=1.0, v0=0.8):
     v = vgain * vbus * duty_frac
     a = abs(v) - v0
     return 0.0 if a <= 0 else math.copysign(a, v)
+
+
+# ---------------------------------------------------------------- potencia manual (escala 0-100 %)
+# El deslizador del panel va de 0 a 100 % y el sentido se elige aparte. 0 % = parado,
+# 1 % = el PWM con el que el motor apenas arranca, 100 % = el tope elegido para ese motor.
+# Lo que viaja por /scara/power sigue siendo % de PWM real (0-100 % de 1023, el firmware lo limita a ~63 %).
+POWER_DEFAULT = (dict(arranque=7.0, tope=60.0),       # M1 · eslabón 1
+                 dict(arranque=7.0, tope=30.0),       # M2 · eslabón 2 (eslabón liviano: con menos le basta)
+                 dict(arranque=7.0, tope=60.0))       # M3 · atornillador
+
+
+def potencia_a_pwm(pct, arranque, tope):
+    """% del deslizador (-100..100, el signo es el sentido) -> % de PWM real con signo."""
+    p = max(-100.0, min(100.0, float(pct)))
+    if abs(p) < 0.5:
+        return 0.0
+    tope = max(0.0, min(DUTY_MAX_PCT, tope))
+    arranque = max(0.0, min(tope, arranque))
+    return math.copysign(arranque + (tope - arranque) * abs(p) / 100.0, p)
+
+
+# ---------------------------------------------------------------- corriente de la fuente
+# La fuente no ve la corriente de armadura: con PWM, cada motor le pide en promedio |i| * duty.
+# Además alimenta la parte lógica (ESP32, reguladores, encoders, driver), que se mide en la fuente
+# con los motores apagados y se escribe en el panel.
+I_LOGICA_DEFAULT = 0.060                              # A, valor de arranque: medirlo en la fuente
+
+
+def corriente_fuente(i_logica, corrientes_A, duties_frac):
+    """Corriente que debería marcar la fuente: lógica + suma de |i_motor| * |duty|."""
+    tot = float(i_logica)
+    for i, d in zip(corrientes_A, duties_frac):
+        if i == i and d == d:                          # ignora NaN
+            tot += abs(i) * min(1.0, abs(d))
+    return tot

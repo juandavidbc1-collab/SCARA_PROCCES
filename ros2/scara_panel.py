@@ -603,7 +603,7 @@ class MotorCard(QtWidgets.QFrame):
         g = QtWidgets.QGridLayout()
         g.setHorizontalSpacing(10)
         self.vals = []
-        for i, (t, u) in enumerate((("Velocidad", "rpm · Kalman"), ("Corriente", "mA · Kalman"), ("PWM", "%"))):
+        for i, (t, u) in enumerate((("Velocidad", "rpm · Kalman"), ("Corriente", "mA · motor (Kalman)"), ("PWM", "% real"))):
             g.addWidget(label(t, "muted"), 0, i)
             v = label("—", "big")
             g.addWidget(v, 1, i)
@@ -614,32 +614,55 @@ class MotorCard(QtWidgets.QFrame):
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(label("Potencia", "muted"))
-        bm = button("−10", "seg")
-        bm.clicked.connect(lambda: self.slider.setValue(self.slider.value() - 10))
-        row.addWidget(bm)
+        self.b_rev = button("◀", "seg", "Sentido negativo", checkable=True)
+        self.b_fwd = button("▶", "seg", "Sentido positivo", checkable=True)
+        grp = QtWidgets.QButtonGroup(self)
+        grp.setExclusive(True)
+        for b in (self.b_rev, self.b_fwd):
+            b.setFixedWidth(34)
+            grp.addButton(b)
+            b.clicked.connect(self._show_pwm)
+            row.addWidget(b)
+        self.b_fwd.setChecked(True)
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        lim = int(sc.DUTY_MAX_PCT)
-        self.slider.setRange(-lim, lim)
+        self.slider.setRange(0, 100)
+        self.slider.setSingleStep(1)
+        self.slider.setPageStep(10)
         self.slider.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.slider.setToolTip("Potencia manual en lazo abierto (%% de PWM, tope %d %%). Se aplica SOLO mientras mantienes "
-                               "el dead-man en modo Potencia. Doble clic en el valor = 0." % lim)
-        self.slider.valueChanged.connect(lambda v: self.pct_lbl.setText("%+d %%" % v))
+        self.slider.setToolTip("Potencia manual en lazo abierto, de 0 a 100 %. 1 % = apenas arranca, 100 % = el tope de "
+                               "este motor (se cambia en Sintonía). Se aplica SOLO mientras mantienes el dead-man en modo Potencia.")
+        self.slider.valueChanged.connect(self._show_pwm)
         row.addWidget(self.slider, 1)
-        bp = button("+10", "seg")
-        bp.clicked.connect(lambda: self.slider.setValue(self.slider.value() + 10))
-        row.addWidget(bp)
-        self.pct_lbl = button("+0 %", "seg")
+        self.pct_lbl = button("0 %", "seg")
         self.pct_lbl.setMinimumWidth(58)
         self.pct_lbl.setToolTip("Clic: poner en 0")
         self.pct_lbl.clicked.connect(lambda: self.slider.setValue(0))
         row.addWidget(self.pct_lbl)
         lay.addLayout(row)
+        self.pwm_lbl = label("", "unit")
+        lay.addWidget(self.pwm_lbl)
+        self._show_pwm()
 
     def _toggled(self, on):
         self.panel.send("motor %d %s" % (self.m + 1, "on" if on else "off"))
 
+    def _signed(self):
+        return float(self.slider.value()) * (-1.0 if self.b_rev.isChecked() else 1.0)
+
+    def _pwm(self):
+        cfg = self.panel.pow_cfg[self.m]
+        return sc.potencia_a_pwm(self._signed(), cfg["arranque"], cfg["tope"])
+
+    def _show_pwm(self, *_):
+        v = self.slider.value()
+        self.pct_lbl.setText(("%d %%" % v) if v == 0 else ("%s %d %%" % ("◀" if self.b_rev.isChecked() else "▶", v)))
+        cfg = self.panel.pow_cfg[self.m]
+        self.pwm_lbl.setText("= %+.0f %% de PWM   ·   escala de este motor: %.0f–%.0f %% de PWM" % (
+            self._pwm(), cfg["arranque"], cfg["tope"]))
+
     def pct(self):
-        return float(self.slider.value()) if self.toggle.isChecked() else 0.0
+        """% de PWM real con signo que se manda por /scara/power."""
+        return self._pwm() if self.toggle.isChecked() else 0.0
 
     def update_view(self, st, ob):
         if st is not None:
@@ -686,6 +709,15 @@ class Panel(QtWidgets.QMainWindow):
         self.h_st = collections.deque(maxlen=n)           # (t, dict)
         self.trail = collections.deque(maxlen=600)
         self.target = None
+        self.h_sup = collections.deque(maxlen=n)          # (t, corriente estimada de la fuente en A)
+        self.i_sup = None
+        # escala de la potencia manual y corriente de la parte lógica (se recuerdan entre sesiones)
+        self.settings = QtCore.QSettings("SCARA", "panel")
+        self.pow_cfg = [dict(d) for d in sc.POWER_DEFAULT]
+        for m, cfg in enumerate(self.pow_cfg):
+            for k in cfg:
+                cfg[k] = self._setting("potencia/M%d_%s" % (m + 1, k), cfg[k])
+        self.i_logica = self._setting("fuente/i_logica_A", sc.I_LOGICA_DEFAULT)
         self._build()
         app = QtWidgets.QApplication.instance()
         app.installEventFilter(self)
@@ -696,6 +728,21 @@ class Panel(QtWidgets.QMainWindow):
         self.t_ui = QtCore.QTimer(self)
         self.t_ui.timeout.connect(self._refresh)
         self.t_ui.start(50)
+
+    def _setting(self, key, default):
+        try:
+            return float(self.settings.value(key, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _set_pow(self, m, key, value):
+        self.pow_cfg[m][key] = float(value)
+        self.settings.setValue("potencia/M%d_%s" % (m + 1, key), float(value))
+        self.cards[m]._show_pwm()
+
+    def _set_ilog(self, ma):
+        self.i_logica = ma / 1000.0
+        self.settings.setValue("fuente/i_logica_A", self.i_logica)
 
     # ------------------------------------------------------------ construcción
     def _build(self):
@@ -730,8 +777,10 @@ class Panel(QtWidgets.QMainWindow):
         lay.addLayout(tl)
         lay.addSpacing(16)
         self.p_conn, self.p_mode, self.p_fault = Pill(), Pill(), Pill()
-        self.p_home1, self.p_home2, self.p_pow = Pill(), Pill(), Pill()
-        for w in (self.p_conn, self.p_mode, self.p_home1, self.p_home2, self.p_pow, self.p_fault):
+        self.p_home1, self.p_home2, self.p_pow, self.p_sup = Pill(), Pill(), Pill(), Pill()
+        self.p_sup.setToolTip("Corriente que debería marcar la fuente: parte lógica (Sintonía) + Σ |i motor| · duty.\n"
+                              "Compárala con el amperímetro de la fuente.")
+        for w in (self.p_conn, self.p_mode, self.p_home1, self.p_home2, self.p_pow, self.p_sup, self.p_fault):
             lay.addWidget(w)
         lay.addSpacing(8)
         lay.addWidget(label("Topes", "muted"))
@@ -945,7 +994,8 @@ class Panel(QtWidgets.QMainWindow):
         g = QtWidgets.QGridLayout(w)
         g.setContentsMargins(12, 10, 12, 10)
         self.pm_v = self._plot("Velocidad (Kalman) de los 3 motores", "rpm")
-        self.pm_i = self._plot("Corriente (Kalman) de los 3 motores", "mA")
+        self.pm_i = self._plot("Corriente: motores (Kalman) y fuente estimada", "mA")
+        self.c_sup = self._curve(self.pm_i, "fuente = lógica + Σ|i|·duty", C["text"], 1.6, True)
         self.pm_d = self._plot("PWM aplicado", "%")
         self.pm_u = self._plot("Voltaje del modelo (entrada de los observadores)", "V")
         self.c_mv, self.c_mi, self.c_md, self.c_mu = [], [], [], []
@@ -1091,6 +1141,42 @@ class Panel(QtWidgets.QMainWindow):
         l3.addWidget(bt)
         l3.addStretch(1)
         outer.addWidget(f3)
+        # potencia manual y fuente
+        f4 = card()
+        l4 = QtWidgets.QGridLayout(f4)
+        l4.setContentsMargins(14, 12, 14, 12)
+        l4.addWidget(label("Escala de los deslizadores de potencia (0–100 %)", "section"), 0, 0, 1, 6)
+        l4.addWidget(label("arranque [% PWM] = 1 %", "muted"), 1, 1)
+        l4.addWidget(label("tope [% PWM] = 100 %", "muted"), 1, 2)
+        for r, m in enumerate(range(sc.NM), start=2):
+            l4.addWidget(label(sc.MOTOR_NAMES[m], "section"), r, 0)
+            for c_, key in enumerate(("arranque", "tope"), start=1):
+                s = QtWidgets.QDoubleSpinBox()
+                s.setDecimals(0)
+                s.setRange(0, int(sc.DUTY_MAX_PCT))
+                s.setSuffix(" %")
+                s.setValue(self.pow_cfg[m][key])
+                s.valueChanged.connect(lambda v, m=m, key=key: self._set_pow(m, key, v))
+                l4.addWidget(s, r, c_)
+        l4.addWidget(label("Arranque: el PWM con el que el motor apenas empieza a girar (súbelo si con 1–5 %% no se mueve). "
+                           "Tope: el PWM al 100 %% del deslizador (máximo %d %%, límite del firmware). "
+                           "Se guardan en este PC." % int(sc.DUTY_MAX_PCT), "muted"), 5, 0, 1, 6)
+        l4.addWidget(label("Corriente de la parte lógica", "section"), 6, 0)
+        self.sp_ilog = QtWidgets.QDoubleSpinBox()
+        self.sp_ilog.setDecimals(0)
+        self.sp_ilog.setRange(0, 1000)
+        self.sp_ilog.setSuffix(" mA")
+        self.sp_ilog.setValue(self.i_logica * 1000)
+        self.sp_ilog.valueChanged.connect(self._set_ilog)
+        l4.addWidget(self.sp_ilog, 6, 1)
+        l4.addWidget(label("ESP32, reguladores, encoders y driver. Mídela en la fuente con el robot conectado y los motores "
+                           "APAGADOS, y escríbela aquí: el encabezado mostrará lo que debería marcar la fuente "
+                           "(lógica + Σ |i motor| · duty).", "muted"), 7, 0, 1, 6)
+        l4.setColumnStretch(5, 1)
+        for lb in f4.findChildren(QtWidgets.QLabel):
+            if lb.objectName() == "muted":
+                lb.setWordWrap(True)
+        outer.addWidget(f4)
         outer.addStretch(1)
         return w
 
@@ -1188,7 +1274,7 @@ class Panel(QtWidgets.QMainWindow):
         self.manual_hint.setText(
             "Posición: mantén ESPACIO (o el botón) y usa las flechas ← → (J1) ↓ ↑ (J2). También puedes mantener los botones de flecha."
             if pos else
-            "Potencia: ajusta los deslizadores de los motores y MANTÉN el dead-man para aplicarlos (lazo abierto). "
+            "Potencia: elige el sentido (◀ ▶) y el % (0–100) de cada motor y MANTÉN el dead-man para aplicarlos (lazo abierto). "
             "Los ejes con 0 % mantienen su posición; al soltar, todo frena y se queda quieto.")
 
     def _mouse_dm(self, on):
@@ -1215,7 +1301,7 @@ class Panel(QtWidgets.QMainWindow):
             path = os.path.join(os.getcwd(), name)
             self.csv_f = open(path, "w", newline="")
             self.csv_w = csv.writer(self.csv_f)
-            head = ["t_s", "modo", "q1_deg", "q2_deg", "qref1_deg", "qref2_deg", "x_mm", "y_mm", "habilitados"]
+            head = ["t_s", "modo", "q1_deg", "q2_deg", "qref1_deg", "qref2_deg", "x_mm", "y_mm", "habilitados", "I_fuente_est_A"]
             for m in range(sc.NM):
                 head += ["M%d_duty" % (m + 1)] + ["M%d_%s" % (m + 1, f) for f in sc.OBS_FIELDS]
             self.csv_w.writerow(head)
@@ -1313,10 +1399,14 @@ class Panel(QtWidgets.QMainWindow):
             if r:
                 self.ob = r[1]
                 self.h_obs.append((t - self.t0, r[1]))
+                if self.st:
+                    self.i_sup = sc.corriente_fuente(self.i_logica, [o["iK_A"] for o in r[1]],
+                                                     [d / 1023.0 for d in self.st["duty"]])
+                    self.h_sup.append((t - self.t0, self.i_sup))
                 if self.csv_w and self.st:
                     s = self.st
                     row = [round(t - self.t0, 3), sc.mode_name(s["mode"]), s["q"][0], s["q"][1], s["qref"][0], s["qref"][1],
-                           s["xy"][0], s["xy"][1], s["enabled"]]
+                           s["xy"][0], s["xy"][1], s["enabled"], self.i_sup]
                     for m in range(sc.NM):
                         row += [s["duty"][m]] + [r[1][m][f] for f in sc.OBS_FIELDS]
                     self.csv_w.writerow(row)
@@ -1360,6 +1450,10 @@ class Panel(QtWidgets.QMainWindow):
             for p, j in ((self.p_home1, 0), (self.p_home2, 1)):
                 p.set("Home J%d —" % (j + 1), C["muted"])
             self.p_pow.set("potencia: no", C["muted"])
+        if conn and self.i_sup is not None:
+            self.p_sup.set("fuente ≈ %.0f mA" % (self.i_sup * 1000), C["cyan"])
+        else:
+            self.p_sup.set("fuente —", C["muted"])
         for c in self.cards:
             c.update_view(st, self.ob[c.m] if self.ob else None)
         if self.ob:
@@ -1396,6 +1490,9 @@ class Panel(QtWidgets.QMainWindow):
                         self.c_mv[m].setData(t, col(m, "wK_rpm"))
                         self.c_mi[m].setData(t, col(m, "iK_A", 1000.0))
                         self.c_mu[m].setData(t, col(m, "u_V"))
+                    sup = [(ts, v) for ts, v in self.h_sup if ts >= x0 - 1]
+                    if sup:
+                        self.c_sup.setData(np.array([s_[0] for s_ in sup]), np.array([s_[1] for s_ in sup]) * 1000.0)
                     for p in (self.pm_v, self.pm_i, self.pm_d, self.pm_u):
                         p.setXRange(x0, tnow, padding=0)
         if idx == 1 and self.h_st:

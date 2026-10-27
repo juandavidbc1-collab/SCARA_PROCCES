@@ -48,7 +48,7 @@ Juan David Botero Cubides · Ingeniería Mecatrónica · Universidad EIA
 | **Control en el ESP32** | Lazo de **1 kHz** en C: PID + prealimentación + compensación de fricción, perfil trapezoidal sincronizado, cinemática inversa, Home con finales de carrera y supervisión de fallas. |
 | **ROS 2 por micro-ROS** | El ESP32 es el nodo `/scara/scara_esp32`. Consignas `(x, y, z)`, manual con dead-man, potencia manual y comandos llegan por tópicos. Funciona por USB serie o por WiFi. |
 | **3 motores, cada uno se activa por separado** | M1 (eslabón 1), M2 (eslabón 2) y M3 (atornillador). Se habilitan o deshabilitan en vivo (`motor 2 off`). Un motor deshabilitado queda libre. |
-| **Potencia manual** | Deslizadores por motor (% de PWM, lazo abierto) que se aplican mientras mantienes el dead-man. Sirve para mover rápido a mano o hacer girar el atornillador. |
+| **Potencia manual** | Deslizador **0–100 %** y sentido ◀ ▶ por motor (lazo abierto), que se aplica mientras mantienes el dead-man. Cada motor tiene su propia escala (arranque y tope de PWM). Sirve para mover rápido a mano o hacer girar el atornillador. |
 | **Observadores** | Luenberger y filtro de Kalman en el ESP32 para los 3 motores, a 100 Hz. Midiendo solo la velocidad del encoder, estiman **velocidad y corriente**. Usan el modelo identificado del Laboratorio 4 de Control Digital. |
 | **Panel gráfico** | PyQt5 + pyqtgraph, con tema oscuro. Muestra las gráficas de los observadores, la comparación de los 3 motores, la vista XY del brazo y la sintonía en vivo. Tiene registro de eventos y grabación a CSV. Incluye un **modo demo** sin robot. |
 
@@ -122,14 +122,14 @@ Orden obligatorio en el robot: **Home** primero. Sin Home se rechazan `goto` y `
 
 | Zona | Qué hace |
 |---|---|
-| **Encabezado** | Conexión con el ESP32, modo, Home J1/J2, potencia manual activa, falla y los 4 finales de carrera. Botones **HOME · DETENER · BORRAR FALLA · APAGAR**. |
-| **Tarjetas de motor** | Interruptor para **habilitar o deshabilitar** cada motor. Velocidad y corriente estimadas (Kalman), PWM aplicado y **deslizador de potencia** (±63 %, el tope del firmware) con botones ±10 y 0. |
+| **Encabezado** | Conexión con el ESP32, modo, Home J1/J2, potencia manual activa, **corriente estimada de la fuente**, falla y los 4 finales de carrera. Botones **HOME · DETENER · BORRAR FALLA · APAGAR**. |
+| **Tarjetas de motor** | Interruptor para **habilitar o deshabilitar** cada motor. Velocidad y corriente estimadas (Kalman), PWM real aplicado y **deslizador de potencia de 0 a 100 %** con botones de sentido ◀ ▶. Debajo se ve el % de PWM que se envía. Clic en el valor = 0. |
 | **Control manual** | Elige **Posición** (flechas → `/scara/jog`) o **Potencia** (deslizadores → `/scara/power`). El dead-man es el botón verde **MANTENER** o la barra **ESPACIO**. Los botones de flecha también funcionan manteniéndolos presionados. |
 | **Mover a una consigna** | `x, y, z` en mm (con codo +1/−1) o `q1, q2` en grados. En la pestaña Posición, un **clic en el plano** elige `(x, y)`. |
 | **Observadores** | Por motor: velocidad **medida / Luenberger / Kalman a priori / Kalman a posteriori**; **corriente** (Luenberger, Kalman a priori y a posteriori); incertidumbre √P de velocidad y corriente; **ganancia de Kalman**. Botón *Reiniciar observadores* para ver la convergencia. |
-| **Motores** | Velocidad, corriente, PWM y voltaje del modelo de los 3 motores juntos. |
+| **Motores** | Velocidad, corriente, PWM y voltaje del modelo de los 3 motores juntos, y la **corriente que debería marcar la fuente**. |
 | **Posición** | Vista superior con el espacio de trabajo, el brazo, la estela y la consigna. Gráfica de `q` contra `q_ref`. |
-| **Sintonía** | PID por eje (leer / aplicar), polos del Luenberger y σ del Kalman por motor, y el mapa de voltaje `V = g·12·duty − v0` (con valores del L298N del laboratorio o del TB6612 de la tarjeta). |
+| **Sintonía** | PID por eje (leer / aplicar), polos del Luenberger y σ del Kalman por motor, el mapa de voltaje `V = g·12·duty − v0` (con valores del L298N del laboratorio o del TB6612 de la tarjeta), la **escala de los deslizadores** por motor y la **corriente de la parte lógica**. |
 | **Registro** | Eventos con colores, línea de comandos con historial (↑ ↓), ventana de tiempo, pausa y **Grabar CSV** (todas las estimaciones a 20 Hz). |
 
 **Teclado** (con el foco fuera de los cuadros de texto):
@@ -169,6 +169,27 @@ Al arrancar están habilitados **M1 y M2**; M3 empieza deshabilitado (`MOTORES_H
 - Sigue prohibido empujar contra un final de carrera presionado. Con Home hecho, no se sale de los límites por software.
 - **Detener / Apagar / falla** bloquean la potencia hasta que sueltes el dead-man. Así no arranca sola otra vez.
 - Tope: `DUTY_MAX` = 650/1023 ≈ 63 % de PWM.
+
+**Escala del deslizador** (solo en el panel; por `/scara/power` sigue viajando % de PWM real):
+
+| Deslizador | PWM enviado |
+|---|---|
+| 0 % | 0 (el eje mantiene su posición) |
+| 1 % | *arranque*: el PWM con el que el motor apenas empieza a girar |
+| 100 % | *tope* de ese motor |
+
+Por defecto: arranque 7 % para los tres; tope 60 % (M1), **30 % (M2, eslabón 2)** y 60 % (M3). Se cambian en **Sintonía** y el panel los recuerda. Si un motor no se mueve con 1–5 %, sube su arranque; si va muy rápido al 100 %, baja su tope.
+
+**Corriente de la fuente.** La corriente estimada en las tarjetas es la **del motor** (armadura). La fuente marca otra cosa:
+
+```
+I_fuente ≈ I_lógica + Σ |i_motor| · |duty|
+```
+
+- `I_lógica`: ESP32, reguladores, encoders y driver. Se mide en la fuente con el robot conectado y los motores **apagados** (botón APAGAR) y se escribe en Sintonía (60 mA por defecto).
+- `|i_motor| · |duty|`: con PWM el motor solo toma corriente de la fuente durante el tiempo encendido. Con 0,10 A en el motor y 40 % de PWM, la fuente ve unos 40 mA.
+
+El encabezado y la pestaña Motores muestran ese valor para compararlo con el amperímetro de la fuente.
 
 ## 6. Observadores: Luenberger y Kalman
 

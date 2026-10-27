@@ -32,5 +32,11 @@ r = sc.parse_obs([5, 0b101011] + [float(i) for i in range(36)])
 check(r[0] == 5 and r[1][1]["wL_rpm"] == 13 and r[1][0]["ok"] and not r[1][2]["ok"] and r[1][2]["med"], "formato de /scara/obs")
 q = sc.ik(*sc.fk(20, 90))
 check(abs(q[0] - 20) < 1e-9 and abs(q[1] - 90) < 1e-9 and sc.ik(400, 0) is None, "cinematica directa/inversa")
+pa = sc.potencia_a_pwm
+check(pa(0, 7, 30) == 0 and abs(pa(100, 7, 30) - 30) < 1e-9 and abs(pa(1, 7, 30) - 7.23) < 1e-9
+      and abs(pa(-50, 7, 30) + 18.5) < 1e-9, "deslizador 0-100 % -> PWM entre arranque y tope, con sentido")
+check(abs(pa(100, 7, 90) - sc.DUTY_MAX_PCT) < 1e-9 and pa(100, 50, 30) == 30, "tope limitado al del firmware y arranque <= tope")
+check(abs(sc.corriente_fuente(0.06, [0.1, -0.2, float("nan")], [0.5, -0.25, 0.3]) - 0.16) < 1e-12,
+      "corriente de la fuente = logica + suma |i|*|duty|")
 print("\nTODO OK" if not fallos else "\n%d FALLOS" % fallos)
 sys.exit(1 if fallos else 0)

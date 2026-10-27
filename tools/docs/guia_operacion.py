@@ -199,9 +199,9 @@ def contenido():
                  ["3", "x = 400, y = 0 → Ir.", "#ERROR: inalcanzable (alcance de 50 a 190 mm). Validación de consignas."],
                  ["4", "q1 = 20, q2 = 90 → <b>Ir a ángulos</b>.", "Consigna articular. En la pestaña <b>Posición</b> se ve el brazo y la estela."],
                  ["5", "<b>Posición · flechas</b>: mantener ESPACIO (o MANTENER) + flechas.", "Manual con dead-man: al soltar, se detiene."],
-                 ["6", "<b>Potencia · deslizadores</b>: M1 a +20 %, mantener el dead-man.",
+                 ["6", "<b>Potencia · deslizadores</b>: M1 en ▶ 30 %, mantener el dead-man.",
                   "Lazo abierto. J2 (0 %) mantiene su posición. Al soltar frena y se queda donde paró."],
-                 ["7", "Habilitar <b>M3</b> (interruptor), deslizador +30 %, mantener el dead-man.", "El atornillador gira; sus observadores aparecen en Observadores → M3."],
+                 ["7", "Habilitar <b>M3</b> (interruptor), deslizador ▶ 40 %, mantener el dead-man.", "El atornillador gira; sus observadores aparecen en Observadores → M3."],
                  ["8", "Deshabilitar <b>M2</b> e Ir a ángulos.", "Solo se mueve J1; M2 queda libre (se puede mover a mano y no pierde el Home)."],
                  ["9", "Pestaña <b>Observadores</b>, M1: mover y luego <b>Reiniciar observadores</b>.",
                   "Medida vs Luenberger vs Kalman a priori/a posteriori; corriente estimada; σ y K convergen (K<sub>w</sub> ≈ 0,266)."],
@@ -240,19 +240,21 @@ def contenido():
           P("Se abre con " + mono("python3 ros2/scara_panel.py") + " (" + mono("--demo") + " sin robot). Reemplaza al panel Tk; "
             + mono("scara_teleop_ros.py") + " queda como respaldo liviano."),
           table([["Zona", "Qué hace"],
-                 ["Encabezado", "Conexión con el ESP32, modo, Home J1/J2, potencia manual activa, falla y los 4 finales de carrera. "
+                 ["Encabezado", "Conexión con el ESP32, modo, Home J1/J2, potencia manual activa, corriente estimada de la fuente, falla y los 4 finales de carrera. "
                                 "Botones HOME, DETENER, BORRAR FALLA y APAGAR."],
-                 ["Tarjetas de motor", "Interruptor para <b>habilitar/deshabilitar</b>; velocidad y corriente estimadas (Kalman); PWM; "
-                                       "<b>deslizador de potencia</b> (±63 %, tope del firmware) con −10 / +10 y clic en el valor = 0."],
+                 ["Tarjetas de motor", "Interruptor para <b>habilitar/deshabilitar</b>; velocidad y corriente del motor (Kalman); PWM real; "
+                                       "<b>deslizador de potencia de 0 a 100 %</b> con sentido ◀ ▶; debajo, el % de PWM que se envía. "
+                                       "Clic en el valor = 0."],
                  ["Control manual", "<b>Posición</b> (flechas → /scara/jog) o <b>Potencia</b> (deslizadores → /scara/power). "
                                     "Dead-man: botón verde MANTENER o ESPACIO. Los botones de flecha también funcionan manteniéndolos."],
                  ["Mover a una consigna", "x, y, z en mm (codo +1 / −1) o q1, q2 en grados. En Posición, un clic en el plano elige (x, y)."],
                  ["Pestaña Observadores", "Por motor: velocidad medida, Luenberger, Kalman a priori y a posteriori; corriente estimada; "
                                           "incertidumbre √P; ganancia de Kalman. Botón Reiniciar observadores."],
-                 ["Pestaña Motores", "Velocidad, corriente, PWM y voltaje del modelo de los 3 motores juntos."],
+                 ["Pestaña Motores", "Velocidad, corriente, PWM y voltaje del modelo de los 3 motores juntos, y la corriente que debería marcar la fuente."],
                  ["Pestaña Posición", "Vista superior: espacio de trabajo, brazo, estela y consigna; q contra q de referencia."],
                  ["Pestaña Sintonía", "PID por eje (leer/aplicar), polos del Luenberger y σ del Kalman por motor, mapa de voltaje "
-                                      "V = g·12·duty − v0 (valores del L298N del laboratorio o del TB6612)."],
+                                      "V = g·12·duty − v0 (valores del L298N del laboratorio o del TB6612), escala de los deslizadores por motor "
+                                      "(arranque y tope) y corriente de la parte lógica."],
                  ["Registro", "Eventos con colores (verde #LLEGO/#OK, rojo #ERROR/#FALLA, ámbar #MOTOR/#EST/#HOME), línea de "
                               "comandos con historial, ventana de tiempo, pausa y Grabar CSV."],
                  ["Seguridad", "Escribir en un cuadro o perder el foco suelta el dead-man. Clic fuera de los cuadros (o Esc) "
@@ -276,7 +278,13 @@ def contenido():
                  ["Potencia manual", "Solo mientras llega el dead-man (25 Hz; sin latidos 300 ms → 0). Ejes con potencia: lazo "
                                      "abierto. Ejes con 0 %: mantienen posición. Al soltar: frenan y se quedan donde paran."],
                  ["Atornillador (M3)", "Solo se mueve con potencia manual; funciona en paralelo al brazo, incluso con el brazo en OFF."],
+                 ["Escala 0–100 %", "0 % = parado (mantiene posición); 1 % = <i>arranque</i> (PWM con el que apenas gira); 100 % = "
+                                    "<i>tope</i> del motor. Por defecto: arranque 7 %; tope 60 % M1, 30 % M2, 60 % M3. Se cambian en "
+                                    "Sintonía y el panel los recuerda. Por /scara/power sigue viajando % de PWM real."],
                  ["Límites", "Tope 63 % de PWM, rampa de 0,34 s, sin empujar contra un final de carrera, límites por software con Home."],
+                 ["Corriente de la fuente", "La de las tarjetas es la del motor. La fuente marca I<sub>lógica</sub> + Σ |i<sub>motor</sub>| · duty: "
+                                            "la lógica (ESP32, reguladores, encoders, driver) se mide con los motores APAGADOS y se escribe "
+                                            "en Sintonía; con PWM, el motor solo toma corriente de la fuente el tiempo encendido."],
                  ["Bloqueo", "Detener, Apagar o una falla bloquean la potencia hasta soltar y volver a presionar el dead-man."]],
                 [3.6 * cm, 13.9 * cm], first_bold=True))]
 
