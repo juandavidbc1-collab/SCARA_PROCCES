@@ -232,7 +232,7 @@ def contenido():
                "                     #EST: M1 Luenberger polos 0.100 +/- 0.100j -> L = [0.036732, 0.71198]\n"
                "> kal 1 10 0.3 0.81 -> #OK: M1 Kalman sig_i=10.0 mA sig_w=0.30 rpm sig_y=0.81 rpm\n"
                "> est reset       -> #OK: observadores reiniciados\n"
-               "> gain            -> #INFO: J1 kp=5350 ki=18500 kd=295 kff=85 fric=70 | J2 kp=5350 ki=18500 kd=295 kff=85 fric=70\n"
+               "> gain            -> #INFO: J1 kp=5350 ki=18500 kd=295 kff=85 fric=70 | J2 kp=5000 ki=3000 kd=180 kff=80 fric=70\n"
                "> stop / off / clear / status  (como antes; 'status' ahora incluye  motores:12-)\n"
                "(stop con el dead-man de potencia presionado) -> #INFO: potencia manual bloqueada: suelta el dead-man ..."))]
 
@@ -365,6 +365,8 @@ def contenido():
                   "Libera el brazo, Borrar falla, repite Home. Si vuelve: pulse 1 / pulse 2 y revisa ganancias (respaldo: 5000 3000 180 80 70)."],
                  ["<b>#FALLA: tiempo de Home agotado</b>", "PWM de búsqueda bajo o brazo trabado.", "Revisa que nada estorbe; sube HOME_DUTY (170) en config.h."],
                  ["<b>#ERROR: no se puede ir a (x, y): inalcanzable</b>", "Fuera de 50 a 190 mm o singular.", "Punto dentro de los círculos o el otro codo."],
+                 ["Un eslabón muy agresivo (vibra, busca la posición, PWM alto estando quieto)", "Ganancias altas para ese eje (sobre todo ki).",
+                  "Sintonía: baja ki y luego kd, Aplicar (dura hasta reiniciar). Para dejarlo fijo: src/config.c. J2 ya viene con 5000 3000 180 80 70."],
                  ["<b>#ERROR: no llego a la consigna a tiempo</b>", "El brazo se detuvo justo fuera de la tolerancia (fricción).", "Revisa ganancias (fric, ki) o repite."],
                  ["El robot se detiene a ratos en manual", "Se pierden latidos del dead-man (300 ms).", "Comportamiento seguro; cierra programas pesados, revisa el USB."],
                  ["Las gráficas van 'a saltos'", "Ancho de banda a 115200 baudios.", "Sube a 460800: " + mono("uros_select.py serial --baud 460800") + " y -b 460800 en el agente."],

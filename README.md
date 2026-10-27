@@ -229,10 +229,10 @@ Planta de posición `θ/V = K / (s (τs + 1))` con `K = 0,9974 rad/s por V` y `�
 
 | Ganancias (PWM) | kp | ki | kd | kff | fric |
 |---|---|---|---|---|---|
-| **Nuevas (modelo identificado)** — por defecto | 5350 | 18500 | 295 | 85 | 70 |
-| Reporte 3 (modelo de la hoja de datos) — respaldo | 5000 | 3000 | 180 | 80 | 70 |
+| **J1** — modelo identificado (por defecto) | 5350 | 18500 | 295 | 85 | 70 |
+| **J2** — Reporte 3 (por defecto) | 5000 | 3000 | 180 | 80 | 70 |
 
-Verificadas en simulación con las dos plantas (`tools/host_tests/sim_pid.c` y `sim_control.c`): en un `goto` el error es menor a 0,25 mm y no hay sobrepaso apreciable. Para volver a las anteriores: `GANANCIAS_DEL_MODELO 0` en `src/config.c`, o en vivo con `gain j kp ki kd kff fric`. **Pruébalas primero con movimientos cortos.**
+Verificadas en simulación con las dos plantas (`tools/host_tests/sim_pid.c` y `sim_control.c`): en un `goto` el error es menor a 0,25 mm y no hay sobrepaso apreciable. En el robot, el eslabón 2 (liviano) quedó **muy agresivo** con las del modelo (ki 6 veces mayor), así que J2 usa las del Reporte 3, que ya estaban probadas (`GANANCIAS_J2_REPORTE3 1` en `src/config.c`). Para que J1 también use las del Reporte 3: `GANANCIAS_DEL_MODELO 0`. En vivo, sin recargar: `gain j kp ki kd kff fric` o la pestaña Sintonía. **Prueba primero con movimientos cortos.**
 
 ## 8. Interfaz ROS 2
 
