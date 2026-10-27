@@ -2,17 +2,17 @@
 """
 Lab 4 en el robot: gráficas de los observadores de Luenberger y Kalman del MOTOR 1 y control del PWM.
 
-    python3 lab4_panel.py                      (busca el ESP32 en /dev/ttyUSB* o /dev/ttyACM*)
-    python3 lab4_panel.py --port /dev/ttyUSB0
-    python3 lab4_panel.py --demo               (sin robot: simula el motor con el mismo modelo)
+Windows:  py lab4_panel.py                  (busca solo el puerto COM del ESP32)
+          py lab4_panel.py --port COM5
+          py lab4_panel.py --demo           (sin robot: simula el motor con el mismo modelo)
+Linux:    python3 lab4_panel.py [--port /dev/ttyUSB0]
 
-Necesita:  sudo apt install python3-matplotlib python3-serial python3-tk
+Necesita:  py -m pip install pyserial matplotlib          (Linux: sudo apt install python3-matplotlib python3-serial python3-tk)
 Teclas:  ESPACIO = parar   ·   m = máximo (100 %)   ·   r = reiniciar observadores
 """
 import argparse
 import collections
 import csv
-import glob
 import math
 import os
 import sys
@@ -33,7 +33,11 @@ N_MAX = 3000
 class Serie:
     def __init__(self, port, baud):
         import serial
-        self.s = serial.Serial(port, baud, timeout=0.05)
+        self.s = serial.Serial()
+        self.s.port, self.s.baudrate, self.s.timeout = port, baud, 0.05
+        self.s.dtr = False                  # en las placas ESP32, DTR/RTS van a BOOT/EN: así no se queda en reset
+        self.s.rts = False
+        self.s.open()
         self.lock = threading.Lock()
 
     def escribir(self, txt):
@@ -132,15 +136,22 @@ class Demo:
 
 
 def buscar_puerto():
-    for p in sorted(glob.glob("/dev/ttyUSB*")) + sorted(glob.glob("/dev/ttyACM*")):
-        return p
-    return None
+    """Puerto del ESP32 en Windows (COMx) o Linux (/dev/ttyUSBx): el primero con un chip USB-serie conocido."""
+    from serial.tools import list_ports
+    puertos = list(list_ports.comports())
+    claves = ("CP210", "CH340", "CH910", "USB-SERIAL", "USB SERIAL", "UART", "SILICON LABS", "WCH", "FTDI", "ESP32")
+    for p in puertos:
+        texto = " ".join(str(x) for x in (p.description, p.manufacturer, p.hwid)).upper()
+        if any(k in texto for k in claves):
+            return p.device
+    usb = [p.device for p in puertos if "USB" in str(p.hwid).upper()]
+    return usb[0] if usb else None
 
 
 # ------------------------------------------------------------------ programa
 def main():
     ap = argparse.ArgumentParser(description="Lab 4: observadores del motor 1 (ESP32)")
-    ap.add_argument("--port", help="puerto serie (por defecto, el primero /dev/ttyUSB* o /dev/ttyACM*)")
+    ap.add_argument("--port", help="puerto serie: COM5 en Windows, /dev/ttyUSB0 en Linux (por defecto lo busca solo)")
     ap.add_argument("--baud", type=int, default=230400)
     ap.add_argument("--demo", action="store_true", help="sin robot: motor simulado")
     a = ap.parse_args()
@@ -150,7 +161,8 @@ def main():
     else:
         port = a.port or buscar_puerto()
         if not port:
-            print("No encontré el ESP32 (/dev/ttyUSB* o /dev/ttyACM*). Usa --port o --demo.")
+            print("No encontré el ESP32. Mira su puerto en el Administrador de dispositivos (Puertos COM y LPT)\n"
+                  "y ejecuta:  py lab4_panel.py --port COM5   (o usa --demo)")
             return 1
         try:
             con = Serie(port, a.baud)
