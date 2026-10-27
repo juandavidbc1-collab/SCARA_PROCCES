@@ -57,6 +57,9 @@ mkdir -p components
 git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git components/micro_ros_espidf_component
 ```
 
+> El zip y el repositorio **no traen** este componente (es otro repositorio): hay que clonarlo en cada carpeta nueva.
+> Su `idf_component.yml` trae la opción `use_gitignore`, que el ESP-IDF 5.3 de PlatformIO no conoce. `tools/uros_select.py serial|wifi` la quita sola y avisa si falta el componente.
+
 Dependencias de Python que el componente necesita **dentro del entorno de ESP-IDF de PlatformIO**
 (no en el sistema). PlatformIO crea ese entorno al compilar por primera vez; si no existe, compila una vez el
 modo texto (`pio run`) y luego:
@@ -202,6 +205,8 @@ docker run -it --rm --net=host microros/micro-ros-agent:jazzy udp4 --port 8888 -
 | El build falla pronto con `colcon: command not found` o falta `catkin_pkg`/`lark` | Faltan dependencias en el entorno `.espidf-*` de PlatformIO (sección 2) |
 | `AttributeError: module 'em' has no attribute 'RAW_OPT'` | `pip install "empy==3.3.4"` en ese mismo entorno |
 | Errores raros de CMake/ROS durante el build | Compilaste con ROS cargado: abre una terminal nueva y no hagas `source` de ROS |
+| `Failed to resolve component 'micro_ros_espidf_component'` | La carpeta del componente está vacía (el zip no lo trae) | `git clone -b jazzy ...` (sección 2) y otra vez `uros_select.py serial` |
+| `idf_component.yml`: `Unknown boolean field "use_gitignore"` | El componente trae una opción que ESP-IDF 5.3 no conoce | `python3 tools/uros_select.py serial` (la quita) o `sed -i '/use_gitignore/d' components/micro_ros_espidf_component/idf_component.yml` |
 | `Kconfig`: no existe `SCARA_COMMS_UROS` o `MICRO_ROS_*` | PlatformIO no encontró `src/Kconfig.projbuild` o el componente. Confirma `components/micro_ros_espidf_component/` y `pio run -t fullclean`. Si PlatformIO no lo soporta, usa la salida de emergencia |
 | El agente no muestra sesión | Baudios distintos (`-b` del agente vs `CONFIG_SCARA_UROS_BAUD`), puerto equivocado, monitor serie abierto, o el docker sin `--privileged`/`-v /dev:/dev` |
 | Aparece el nodo pero `goto` no hace nada | Falta Home (`home`) o hay una falla (`clear`); mira `/scara/event` |

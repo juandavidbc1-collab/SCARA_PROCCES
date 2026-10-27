@@ -369,6 +369,8 @@ def contenido():
                   "Sintonía: baja ki y luego kd, Aplicar (dura hasta reiniciar). Para dejarlo fijo: src/config.c. J2 ya viene con 5000 3000 180 80 70."],
                  ["<b>#ERROR: no llego a la consigna a tiempo</b>", "El brazo se detuvo justo fuera de la tolerancia (fricción).", "Revisa ganancias (fric, ki) o repite."],
                  ["El robot se detiene a ratos en manual", "Se pierden latidos del dead-man (300 ms).", "Comportamiento seguro; cierra programas pesados, revisa el USB."],
+                 ["Failed to resolve component 'micro_ros_espidf_component'", "El zip no trae el componente micro-ROS (es otro repositorio).",
+                  "git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git components/micro_ros_espidf_component"],
                  ["Las gráficas van 'a saltos'", "Ancho de banda a 115200 baudios.", "Sube a 460800: " + mono("uros_select.py serial --baud 460800") + " y -b 460800 en el agente."],
                  ["RViz: el robot no aparece / ejes gigantes", "scara_rviz no corre / display TF activo.", "ros2 node list debe mostrar /scara_rviz; desmarca TF."],
                  [mono("Could not exclusively lock port"), "Otro programa tiene el puerto.", mono("fuser -v /dev/ttyUSB0") + " y cierra ese proceso."]],
@@ -376,13 +378,17 @@ def contenido():
 
     s += [K(P("11. Si hay que volver a compilar el firmware", "h1"),
           P("Solo hace falta si cambias " + mono("config.c") + " o " + mono("config.h") + " (pines del encoder 3, motores habilitados "
-            "al arrancar, ganancias, modelo, observadores). Compila siempre con un entorno limpio, sin ROS cargado:"),
+            "al arrancar, ganancias, modelo, observadores). En una carpeta nueva (zip o clon) primero hay que clonar el componente "
+            "micro-ROS, que no viene incluido, y elegir el modo (esto también lo deja compatible con ESP-IDF 5.3):"),
+          code("git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git components/micro_ros_espidf_component\n"
+               "python3 tools/uros_select.py serial"),
+          P("Compila siempre con un entorno limpio, sin ROS cargado:"),
           code("env -i HOME=\"$HOME\" TERM=\"$TERM\" \\\n"
                "  PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin\" \\\n"
                "  bash --noprofile --norc -c \\\n"
                "  'cd " + DIR_FW + " && pio run -t upload'")),
           table([["Error al compilar", "Solución"],
-                 [mono("Unknown boolean field \"use_gitignore\""), mono("sed -i '/use_gitignore/d' components/micro_ros_espidf_component/idf_component.yml")],
+                 [mono("Unknown boolean field \"use_gitignore\""), mono("python3 tools/uros_select.py serial") + " lo corrige solo; a mano: " + mono("sed -i '/use_gitignore/d' components/micro_ros_espidf_component/idf_component.yml")],
                  [mono("CMake 3.20 or higher is required"), "Enlazar el CMake del sistema: " + mono("ln -s /usr/bin/cmake ~/.platformio/packages/tool-cmake/bin/cmake")
                   + " (después de mover el original a cmake.orig)."],
                  [mono("Could not find ament_cmake") + " / errores raros de ROS", "Compilaste con ROS cargado: usa el comando env -i de arriba."],

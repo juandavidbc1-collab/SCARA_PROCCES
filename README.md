@@ -91,7 +91,9 @@ ROS 2 solo envía consignas y recibe estado y estimaciones.
 sudo apt install python3-pyqt5 python3-pyqtgraph
 
 # 1) firmware en modo micro-ROS por USB (solo si cambiaste algo del firmware)
-python3 tools/uros_select.py serial
+#    en una carpeta nueva (zip o clon), primero el componente micro-ROS, que no viene incluido:
+git clone -b jazzy https://github.com/micro-ROS/micro_ros_espidf_component.git components/micro_ros_espidf_component
+python3 tools/uros_select.py serial        # también deja el componente compatible con ESP-IDF 5.3
 env -i HOME="$HOME" TERM="$TERM" PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$HOME/.local/bin" \
     bash --noprofile --norc -c 'pio run -t fullclean && pio run -t upload'      # compilar SIN ROS cargado
 

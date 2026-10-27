@@ -62,6 +62,32 @@ def write(name, text):
     print("  escrito", name)
 
 
+COMPONENTE = os.path.join(ROOT, "components", "micro_ros_espidf_component")
+REPO_COMPONENTE = "https://github.com/micro-ROS/micro_ros_espidf_component.git"
+
+
+def revisar_componente():
+    """Comprueba que el componente micro-ROS esté descargado y compatible con el ESP-IDF 5.3 de PlatformIO.
+    Su idf_component.yml trae 'use_gitignore' (opción para publicarlo en el registro de Espressif) que el
+    gestor de componentes de ESP-IDF 5.3 no conoce y hace fallar la configuración: se quita."""
+    if not os.path.exists(os.path.join(COMPONENTE, "CMakeLists.txt")):
+        print("  FALTA el componente micro-ROS. Descárgalo con:\n"
+              "    rm -rf components/micro_ros_espidf_component\n"
+              "    git clone -b jazzy %s components/micro_ros_espidf_component\n"
+              "  y vuelve a ejecutar este script." % REPO_COMPONENTE)
+        return False
+    yml = os.path.join(COMPONENTE, "idf_component.yml")
+    if os.path.exists(yml):
+        with open(yml, encoding="utf-8") as f:
+            lineas = f.readlines()
+        limpias = [l for l in lineas if "use_gitignore" not in l]
+        if len(limpias) != len(lineas):
+            with open(yml, "w", encoding="utf-8", newline="\n") as f:
+                f.writelines(limpias)
+            print("  componente micro-ROS: quitada la opción 'use_gitignore' de idf_component.yml (ESP-IDF 5.3 no la conoce)")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description="Selecciona texto / micro-ROS serial / micro-ROS WiFi")
     ap.add_argument("modo", choices=["text", "serial", "wifi"])
@@ -116,6 +142,8 @@ def main():
             os.remove(p)
             print("  borrado", os.path.basename(p))
 
+    if a.modo != "text" and not revisar_componente():
+        return
     print("\nSiguiente:  pio run -t fullclean   y luego   pio run -t upload")
     if a.modo != "text":
         print("IMPORTANTE: compila en una terminal SIN 'source /opt/ros/jazzy/setup.bash' (ver UBUNTU_MICROROS.md).")
