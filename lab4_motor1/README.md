@@ -12,24 +12,33 @@ Versión **mínima**, separada del firmware del SCARA y sin micro-ROS. Solo el m
 | `src/main.c` | Firmware del ESP32: PWM del motor 1, encoder, Luenberger y Kalman cada 10 ms |
 | `lab4_panel.py` | Programa del PC: gráficas en vivo, deslizador y botones de PWM, CSV |
 
-## Pasos
+## Pasos en Windows
+
+1. **Copia la carpeta** `lab4_motor1` a una ruta corta y sin espacios, por ejemplo `C:\lab4_motor1`. ESP-IDF falla con rutas largas o con espacios.
+2. **Carga el firmware.** En VS Code con PlatformIO: *File → Open Folder* → `C:\lab4_motor1`, conecta el ESP32 y pulsa **→ Upload** en la barra azul de abajo. La primera vez tarda varios minutos. Si no encuentra el puerto, quita el `;` de `upload_port` en `platformio.ini` y pon tu puerto (por ejemplo `COM5`).
+3. **Cierra el monitor serie** de PlatformIO si lo abriste: el puerto COM solo lo puede usar un programa a la vez.
+4. **Instala lo de Python** (una sola vez) en PowerShell o CMD:
+   ```
+   py -m pip install pyserial matplotlib
+   ```
+5. **Abre las gráficas:**
+   ```
+   cd C:\lab4_motor1
+   py lab4_panel.py
+   ```
+   Busca solo el puerto del ESP32. Si no lo encuentra, mira el número en el *Administrador de dispositivos → Puertos (COM y LPT)* y usa `py lab4_panel.py --port COM5`.
+
+Sin el robot: `py lab4_panel.py --demo` simula el motor con el mismo modelo.
+
+<details>
+<summary>En Linux</summary>
 
 ```bash
-# 0) una sola vez
 sudo apt install python3-matplotlib python3-serial python3-tk
-sudo usermod -aG dialout $USER          # si no tienes permiso para /dev/ttyUSB0 (luego cierra sesión)
-
-# 1) cerrar cualquier programa que use el puerto (agente de Docker, monitor de PlatformIO)
-
-# 2) cargar el firmware (ESP32 conectado por USB)
-cd lab4_motor1
-pio run -t upload
-
-# 3) abrir las gráficas
-python3 lab4_panel.py                   # o:  python3 lab4_panel.py --port /dev/ttyUSB0
+cd lab4_motor1 && pio run -t upload
+python3 lab4_panel.py            # o --port /dev/ttyUSB0
 ```
-
-Sin el robot: `python3 lab4_panel.py --demo` simula el motor con el mismo modelo.
+</details>
 
 **Botones:** PARAR (0 %) · MÁXIMO (100 %) · 50 % · −100 % · Reiniciar observadores · Grabar CSV · Pausar.
 **Teclas:** `espacio` parar · `m` máximo · `r` reiniciar observadores.
