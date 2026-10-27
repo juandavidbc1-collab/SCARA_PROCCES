@@ -6,3 +6,9 @@ build/
 !/sdkconfig.defaults
 __pycache__/
 *.csv
+
+# proyecto mínimo del Lab 4
+lab4_motor1/.pio/
+lab4_motor1/sdkconfig
+lab4_motor1/sdkconfig.*
+!lab4_motor1/sdkconfig.defaults
