@@ -8,7 +8,7 @@ Windows:  py lab4_panel.py                  (busca solo el puerto COM del ESP32)
 Linux:    python3 lab4_panel.py [--port /dev/ttyUSB0]
 
 Necesita:  py -m pip install pyserial matplotlib          (Linux: sudo apt install python3-matplotlib python3-serial python3-tk)
-Teclas:  ESPACIO = parar   ·   m = máximo (100 %)   ·   r = reiniciar observadores
+Teclas:  ESPACIO = parar   ·   m = máximo (100 %)   ·   r = reiniciar observadores   ·   f = frenar con la mano (solo en --demo)
 """
 import argparse
 import collections
@@ -53,15 +53,17 @@ class Serie:
 
 class Demo:
     """Simula el firmware: motor con el modelo del laboratorio, encoder cuantizado y los mismos observadores."""
-    A = ((-0.00147851, -0.00308602), (0.50976057, 0.91345392))
-    B = (0.01976948, 0.07782986)
-    L = (0.24358162, 0.41197541)
+    # mismo modelo que el firmware con MODELO_CORREGIDO 1 (Ra = 2,2 ohm)
+    A = ((-0.00977766, -0.40878075), (0.02261592, 0.92101691))
+    B = (0.42457030, 0.07840520)
+    L = (0.12408000, 0.71123924)
     RPM = math.pi / 30
 
     def __init__(self):
         self.cola = collections.deque()
         self.pwm_pedido = 0.0
         self.reset = False
+        self.carga = False                                  # tecla f: freno con la mano
         threading.Thread(target=self._correr, daemon=True).start()
 
     def escribir(self, txt):
@@ -95,7 +97,7 @@ class Demo:
         P = self.Pk
         M = [[A[i][0] * P[0][j] + A[i][1] * P[1][j] for j in range(2)] for i in range(2)]
         Pm = [[M[i][0] * A[j][0] + M[i][1] * A[j][1] for j in range(2)] for i in range(2)]
-        Pm[0][0] += 0.010 ** 2; Pm[1][1] += (0.30 * self.RPM) ** 2
+        Pm[0][0] += 0.010 ** 2; Pm[1][1] += (1.0 * self.RPM) ** 2
         S = Pm[1][1] + (0.81 * self.RPM) ** 2
         self.K = [Pm[0][1] / S, Pm[1][1] / S]
         e = y - self.xp[1]
@@ -105,7 +107,7 @@ class Demo:
         self.Pm = Pm
 
     def _correr(self):
-        ra, la, kv, b, j = 50.0, 0.060, 0.167092, 2.79197e-3, 3.63232e-4
+        ra, la, kv, b, j = 2.2, 0.00264, 0.965791, 0.016138, 0.047718
         i = w = th = 0.0; duty = 0.0; u_prev = 0.0; c_prev = 0; t = 0.0; rc = 2 * math.pi / 6424
         self._obs_reset()
         self.cola.append("#LAB4: modo DEMO (motor simulado)")
@@ -120,7 +122,8 @@ class Demo:
                 v = 12 * duty; a = abs(v) - 0.8; V = 0.0 if a <= 0 else math.copysign(a, v)
                 for _ in range(10):
                     i += (V - ra * i - kv * w) / la * 1e-4
-                    w += (kv * i - b * w - 0.0015 * math.tanh(w / 0.2)) / j * 1e-4
+                    tl = 0.2 * math.tanh(w / 0.2) + (0.6 * math.tanh(w / 0.2) if self.carga else 0.0)
+                    w += (kv * i - b * w - tl) / j * 1e-4
                     th += w * 1e-4
             c = math.floor(th / rc); y = (c - c_prev) * rc / 0.01; c_prev = c
             dm = dsum / 10; v = 12 * dm; a = abs(v) - 0.8; u = 0.0 if a <= 0 else math.copysign(a, v)
@@ -307,6 +310,10 @@ def main():
             poner(100)
         elif ev.key == "r":
             con.escribir("r\n")
+        elif ev.key == "f" and a.demo:
+            con.carga = not con.carga
+            estado["msg"] = "DEMO: frenando con la mano (f para soltar)" if con.carga else "DEMO: sin carga"
+
 
     fig.canvas.mpl_connect("key_press_event", tecla)
 

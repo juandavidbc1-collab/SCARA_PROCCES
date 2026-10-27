@@ -11,10 +11,20 @@
  *   r                reiniciar observadores (x = 0, P = P0)
  * Si no llega ninguna orden en 1,5 s, el motor se detiene (por si se cierra el programa del PC).
  *
- * Modelo (el del laboratorio, referido al eje de salida):  x = [i (A); w (rad/s)],  y = w
+ * Modelo (referido al eje de salida):  x = [i (A); w (rad/s)],  y = w
  *   La di/dt = V - Ra i - Kv w      J dw/dt = Kv i - B w
- *   Ra = 50, La = 0.060, Kv = 0.167092, B = 2.79197e-3, J = 3.63232e-4
- * Discretizado con ZOH, Ts = 10 ms (A, B y L calculados con expm y Ackermann; mismos del laboratorio).
+ *
+ * MODELO_CORREGIDO 1 (por defecto): Ra = 2,2 ohm, de la corriente de bloqueo de la hoja de datos (5,5 A a 12 V).
+ *   Kv, B y J se recalcularon para conservar lo identificado en el laboratorio: 114,3 rpm y 0,2 A a 12 V y la
+ *   misma constante de tiempo (0,108 s). La velocidad responde IGUAL que con el modelo del laboratorio (misma
+ *   K = 0,9975 rad/s/V y tau), pero ahora una carga sí sube la corriente: con Ra = 50 la corriente máxima posible
+ *   era 12/50 = 0,24 A, y frenar el motor con la mano casi no la cambiaba.
+ *     Ra = 2.2, La = 0.00264 (misma La/Ra = 1,2 ms), Kv = 0.965791, B = 0.016138, J = 0.047718
+ *   Luenberger: polos 0,1 (doble). Con 0,25 +/- 0,25j la L de corriente sale muy grande (5,3) y ante una carga
+ *   estima la corriente al revés. Kalman: sigma_w = 1 rpm para que siga la velocidad cuando hay carga.
+ * MODELO_CORREGIDO 0: el modelo del laboratorio tal cual (Ra = 50, La = 0.060, Kv = 0.167092, B = 2.79197e-3,
+ *   J = 3.63232e-4), polos 0,25 +/- 0,25j, sigma_w = 0,30 rpm.
+ * Discretizado con ZOH, Ts = 10 ms (A, B y L calculados con expm y Ackermann).
  */
 #include <math.h>
 #include <stdarg.h>
@@ -61,13 +71,24 @@ static const gpio_num_t OTROS[] = { GPIO_NUM_19, GPIO_NUM_5, GPIO_NUM_18, GPIO_N
 #define TIMEOUT_MS   1500
 #define TRABADO_PWM  350              /* con más de ~34 % de PWM ... */
 #define TRABADO_MS   300              /* ... y menos de 3 cuentas en este tiempo -> motor trabado */
+#define I_MAX        1.0f             /* corriente estimada (Kalman) máxima [A]: el TB6612 aguanta 1,2 A continuos */
+#define I_MAX_MUESTRAS 30             /* ... durante 30 muestras seguidas (0,3 s) -> se detiene */
+#define I_MAX_ESPERA_MS 600           /* no se vigila durante la rampa ni 0,6 s después (el arranque pide más corriente) */
 
 /* ------------------------------------------------------------------ observadores */
+#define MODELO_CORREGIDO 1
+#if MODELO_CORREGIDO
+static const float A[2][2] = { { -0.00977766f, -0.40878075f }, { 0.02261592f, 0.92101691f } };
+static const float B[2] = { 0.42457030f, 0.07840520f };
+static const float L[2] = { 0.12408000f, 0.71123924f };      /* polos de A - LC: 0,1 (doble) */
+#define SIG_W   (1.0f * RPM)                                 /* Q: 1 rpm */
+#else
 static const float A[2][2] = { { -0.00147851f, -0.00308602f }, { 0.50976057f, 0.91345392f } };
 static const float B[2] = { 0.01976948f, 0.07782986f };
 static const float L[2] = { 0.24358162f, 0.41197541f };      /* polos de A - LC: 0,25 +/- 0,25j */
-#define SIG_I   0.010f                                       /* Q: 10 mA */
 #define SIG_W   (0.30f * RPM)                                /* Q: 0,30 rpm */
+#endif
+#define SIG_I   0.010f                                       /* Q: 10 mA */
 #define SIG_Y   (0.81f * RPM)                                /* R: 0,81 rpm (R = 0,655 rpm^2 medido en el lab) */
 #define P0_I    0.10f
 #define P0_W    (1.0f * RPM)
@@ -274,7 +295,7 @@ static void cada_ms(void *arg) { (void)arg; xTaskNotifyGive(h_control); }
 static void tarea_control(void *arg)
 {
     (void)arg;
-    int duty = 0, objetivo = 0, n = 0, suma = 0, bloqueo = 0, freno_ms = 0;
+    int duty = 0, objetivo = 0, n = 0, suma = 0, bloqueo = 0, freno_ms = 0, sobre_i = 0, estable_ms = 0;
     int32_t c_prev = cuentas(), c_trab = c_prev;
     int ms_trab = 0;
     float u_prev = 0.0f;
@@ -333,6 +354,7 @@ static void tarea_control(void *arg)
             else duty = objetivo;
             motor(duty);
         }
+        if (duty == objetivo && duty != 0) { if (estable_ms < 100000) estable_ms++; } else estable_ms = 0;
 
         /* observadores cada 10 ms */
         suma += duty;
@@ -345,6 +367,15 @@ static void tarea_control(void *arg)
         suma = 0;
         obs_paso(&O, u_prev, y);
         u_prev = u;
+
+        /* protección: corriente estimada alta sostenida (p. ej. frenarlo con la mano a mucho PWM) */
+        if (fabsf(O.xk[0]) > I_MAX && estable_ms > I_MAX_ESPERA_MS) {
+            if (++sobre_i >= I_MAX_MUESTRAS) {
+                bloqueo = duty > 0 ? +1 : -1;
+                objetivo = duty = 0; freno_ms = 200; sobre_i = 0;
+                enviar("#FALLA: corriente estimada mayor a %.1f A durante 0,3 s. Motor detenido\n", I_MAX);
+            }
+        } else sobre_i = 0;
         if (++envio < ENVIAR_CADA) continue;
         envio = 0;
 
