@@ -119,14 +119,14 @@ class Demo:
             dsum = 0.0
             for _ in range(10):                                   # 10 ms con rampa de 3/1023 por ms
                 duty += max(-3 / 1023, min(3 / 1023, obj - duty)); dsum += duty
-                v = 12 * duty; a = abs(v) - 0.8; V = 0.0 if a <= 0 else math.copysign(a, v)
+                V = 12 * duty                                    # motor "real": la fricción va como par
                 for _ in range(10):
                     i += (V - ra * i - kv * w) / la * 1e-4
-                    tl = 0.2 * math.tanh(w / 0.2) + (0.6 * math.tanh(w / 0.2) if self.carga else 0.0)
+                    tl = 0.02 * math.tanh(w / 0.2) + (0.6 * math.tanh(w / 0.2) if self.carga else 0.0)
                     w += (kv * i - b * w - tl) / j * 1e-4
                     th += w * 1e-4
             c = math.floor(th / rc); y = (c - c_prev) * rc / 0.01; c_prev = c
-            dm = dsum / 10; v = 12 * dm; a = abs(v) - 0.8; u = 0.0 if a <= 0 else math.copysign(a, v)
+            dm = dsum / 10; v = (12.8 / 12) * 12 * dm; a = abs(v) - 0.8; u = 0.0 if a <= 0 else math.copysign(a, v)   # como el firmware
             self._obs(u_prev, y); u_prev = u
             R = self.RPM
             n_muestra = getattr(self, "n_muestra", 0) + 1
@@ -160,6 +160,7 @@ def main():
     ap.add_argument("--port", help="puerto serie: COM5 en Windows, /dev/ttyUSB0 en Linux (por defecto lo busca solo)")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--demo", action="store_true", help="sin robot: motor simulado")
+    ap.add_argument("--vbus", type=float, default=12.0, help="voltaje real de la fuente de los motores [V] (mídelo)")
     a = ap.parse_args()
 
     if a.demo:
@@ -207,7 +208,7 @@ def main():
 
     def emisor():                                                   # el ESP32 para el motor si no recibe nada en 1,5 s
         while True:
-            con.escribir("p %.1f\n" % estado["pwm"])
+            con.escribir("v %.2f\np %.1f\n" % (a.vbus, estado["pwm"]))
             time.sleep(0.2)
 
     threading.Thread(target=lector, daemon=True).start()
