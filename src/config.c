@@ -26,7 +26,7 @@ const screw_model_t M3_MODEL = {
 const screw_cfg_t SCREW_CFG = {
     .vueltas_meta = SCREW_VUELTAS_META, .torque_meta = SCREW_TORQUE_META, .vueltas_lento = 2.0f,
     .vueltas_min = 0.75f * SCREW_VUELTAS_META, .vueltas_max = SCREW_VUELTAS_META + 2.0f,
-    .duty_rapido = SCREW_DUTY_RAPIDO, .duty_lento = SCREW_DUTY_LENTO, .torque_asiento = 0.15f,
+    .duty_rapido = SCREW_DUTY_RAPIDO, .duty_lento = SCREW_DUTY_LENTO, .torque_asiento = 0.035f,
     .i_max = 2.4f,                   /* U6 con sus dos canales en paralelo: 2,4 A continuos */
     .t_arranque_s = 0.4f, .t_confirma_s = 0.03f, .t_max_s = SCREW_T_MAX_S, .w_quieto = 0.3f,
 };
