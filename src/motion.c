@@ -16,13 +16,19 @@ void motion_set_elbow(int e) { g_elbow = (e >= 0) ? 1 : -1; }
 motion_res_t motion_goto_xyz(float x, float y, float z, char *msg, size_t n)
 {
 #if Z_CHECK
-    if (fabsf(z - Z_FIJO_MM) > Z_TOL_MM) {
+    if (!(fabsf(z - Z_FIJO_MM) <= Z_TOL_MM)) {             /* escrito asi para que NaN tampoco pase */
         snprintf(msg, n, "#ERROR: z = %.1f mm no es valida; la altura fija es %.1f +-%.1f mm.", z, Z_FIJO_MM, Z_TOL_MM);
         return MOTION_ERR_Z;
     }
 #else
     (void)z;
 #endif
+    for (int j = 0; j < NJ; j++) {
+        if (!ctl_motor_enabled(j)) {
+            snprintf(msg, n, "#ERROR: J%d esta desactivado: ir a (x, y) necesita J1 y J2. Usa ang o activalo.", j + 1);
+            return MOTION_ERR_MOTOR;
+        }
+    }
     float qmin[2], qmax[2];
     for (int j = 0; j < NJ; j++) ctl_get_limits(j, &qmin[j], &qmax[j]);
     float q[2]; int cod = 0;
@@ -44,8 +50,13 @@ motion_res_t motion_goto_xyz(float x, float y, float z, char *msg, size_t n)
 
 motion_res_t motion_goto_ang(float a, float b, char *msg, size_t n)
 {
+    if (!isfinite(a) || !isfinite(b)) {
+        snprintf(msg, n, "#ERROR: los angulos deben ser numeros.");
+        return MOTION_ERR_LIMITES;
+    }
     float q[2] = { a * DEG2RAD, b * DEG2RAD };
     for (int j = 0; j < NJ; j++) {
+        if (!ctl_motor_enabled(j)) continue;           /* su ángulo se ignora: el eje no participa */
         float lo, hi; ctl_get_limits(j, &lo, &hi);
         if (q[j] < lo || q[j] > hi) {
             snprintf(msg, n, "#ERROR: q%d = %.1f deg esta fuera de sus limites (%.1f a %.1f deg).", j + 1,

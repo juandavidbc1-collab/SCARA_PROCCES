@@ -13,7 +13,7 @@
  *
  *   Publicaciones (ESP32 -> PC)
  *     /scara/state         std_msgs/Float32MultiArray   20 Hz, best-effort. Ver STATE_* abajo.
- *     /scara/ee_position   geometry_msgs/Point          20 Hz, best-effort. Posición medida del efector [mm].
+ *     /scara/ee_position   geometry_msgs/Point          5 Hz, best-effort. Posición medida del efector [mm].
  *     /scara/event         std_msgs/String              "#LLEGO ...", "#HOME ...", "#ERROR ...", "#FALLA ..."
  *
  * Seguridad: el dead-man vive en el firmware (DEADMAN_TIMEOUT_MS): si dejan de llegar latidos
@@ -63,7 +63,14 @@
 
 /* Índices de /scara/state (Float32MultiArray) */
 enum { STATE_Q1_DEG = 0, STATE_Q2_DEG, STATE_X, STATE_Y, STATE_MODE, STATE_FAULT, STATE_HOMED1, STATE_HOMED2,
-       STATE_FC_BITS, STATE_QREF1_DEG, STATE_QREF2_DEG, STATE_DUTY1, STATE_DUTY2, STATE_N };
+       STATE_FC_BITS, STATE_QREF1_DEG, STATE_QREF2_DEG, STATE_DUTY1, STATE_DUTY2,
+       STATE_EN_BITS,      /* bit 0 = J1, bit 1 = J2, bit 2 = M3 activos */
+       STATE_CTRL,         /* 0 = PID; 1..5 = RST posicional, incremental, enmascarado, PID original, a medida */
+       STATE_TOOL,         /* PWM de M3 */
+       /* Atornillado. Calculado con el modelo de M3: no hay sensor de corriente. */
+       STATE_TOOL_I, STATE_TOOL_TORQUE, STATE_TOOL_FUERZA, STATE_TOOL_PRESION, STATE_TOOL_VUELTAS, STATE_TOOL_PROF,
+       STATE_SERVO_DEG, STATE_SCREW_FASE,
+       STATE_N };
 
 /* modo: 0 OFF, 1 HOMING, 2 HOLD, 3 MOVE, 4 JOG, 5 PULSE, 6 FAULT  (ctl_mode_t) */
 
@@ -159,10 +166,26 @@ static void timer_cb(rcl_timer_t *t, int64_t last_call_time)
     state_data[STATE_QREF2_DEG] = s.qref[1] * RAD2DEG;
     state_data[STATE_DUTY1]     = s.duty[0];
     state_data[STATE_DUTY2]     = s.duty[1];
+    state_data[STATE_EN_BITS]   = (float)s.en;
+    state_data[STATE_CTRL]      = (float)s.ctrl;
+    state_data[STATE_TOOL]      = s.tool_duty;
+    state_data[STATE_TOOL_I]       = s.tool_i;
+    state_data[STATE_TOOL_TORQUE]  = s.tool_torque;
+    state_data[STATE_TOOL_FUERZA]  = s.tool_fuerza;
+    state_data[STATE_TOOL_PRESION] = s.tool_presion;
+    state_data[STATE_TOOL_VUELTAS] = s.tool_vueltas;
+    state_data[STATE_TOOL_PROF]    = s.tool_prof;
+    state_data[STATE_SERVO_DEG]    = s.servo_deg;
+    state_data[STATE_SCREW_FASE]   = (float)s.screw_fase;
     (void)rcl_publish(&pub_state, &msg_state, NULL);
 
-    msg_ee.x = x; msg_ee.y = y; msg_ee.z = Z_FIJO_MM;
-    (void)rcl_publish(&pub_ee, &msg_ee, NULL);
+    /* /scara/ee_position repite x e y de /scara/state: a 5 Hz para liberar el enlace serie */
+    static uint8_t div_ee = 0;
+    if (++div_ee >= 4) {
+        div_ee = 0;
+        msg_ee.x = x; msg_ee.y = y; msg_ee.z = Z_FIJO_MM;
+        (void)rcl_publish(&pub_ee, &msg_ee, NULL);
+    }
 
     char ev[160];
     for (int i = 0; i < 4 && ctl_event_pop(ev, sizeof ev, 0); i++) send_event(ev);

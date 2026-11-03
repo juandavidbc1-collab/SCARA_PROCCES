@@ -1,7 +1,57 @@
-# Firmware SCARA v5 — operación punto a punto (Reporte 3)
+# Firmware SCARA — proyecto final
 
-ESP32-DevKitC WROOM-32 · ESP-IDF 5.3 desde PlatformIO · Windows primero, luego Ubuntu + micro-ROS.
-Control por **teclado por serial** (flechas + espacio como dead-man). Motor 3 y sensado de corriente: **desactivados**.
+ESP32-DevKitC WROOM-32 · ESP-IDF 5.3 · ROS 2 Jazzy + micro-ROS. Control RST en el ESP32, panel en PyQt5, gemelo digital en RViz y simulador completo.
+
+**Manual de uso:** [`docs/MANUAL.md`](docs/MANUAL.md) · **Diseño y simulación del RST:** [`docs/rst/REPORTE_RST.md`](docs/rst/REPORTE_RST.md) · **Motor 3 y atornillado:** [`docs/m3/REPORTE_M3.md`](docs/m3/REPORTE_M3.md)
+
+## Probarlo sin el robot
+
+```bash
+source /opt/ros/jazzy/setup.bash
+python3 ros2/scara_panel.py --sim       # simulador + RViz + panel
+```
+
+El simulador compila y corre el mismo C del firmware (`src/control.c`, `rst.c`, `motion.c`, `uros_cmd.c`) contra un modelo de los motores, y publica los mismos tópicos que el ESP32.
+
+## Estado frente a los requisitos
+
+| Requisito | Estado |
+|---|---|
+| RST posicional, incremental y enmascarado diseñados | Hecho. La definición de "masked" es provisional: confirmarla con el profesor |
+| Simular la respuesta de posición de los tres | Hecho: `python3 tools/rst/simulate.py` |
+| Implementar en el robot el que mejor funcione | Hecho en firmware. Por defecto va `orig`, el PID original escrito como RST, porque da el PWM que ya funcionaba; las otras tres se eligen en el panel. **Falta probarlo en el robot** |
+| Gemelo digital en RViz | Hecho; `/tf` y `/joint_states` comprobados con el simulador. **Falta verlo con el robot real** |
+| Proceso repetitivo de la secuencia asignada | Hecho en `ros2/secuencia.yaml`: 16 huecos en 4 placas, con servo y atornillado. 16 de 16 `ok` en simulación. **Falta probarlo en el robot** |
+| Modelo de M3 de 200 rpm; corriente, presión y avance del tornillo | Hecho: `src/screw.c`. Motor supuesto Pololu 37D 50:1, sin medir. Ver `docs/m3/REPORTE_M3.md` |
+| Servo MG90S en lugar del sensor de corriente | Hecho en firmware (J13, GPIO32). **Falta probarlo: la señal pasa por R40 en serie** |
+| Manual de uso | `docs/MANUAL.md` y su copia en Notion |
+| Botón de paro de emergencia | En el firmware y el panel. El corte físico de 12 V es hardware, según `CONEXIONES_BORNERAS_v7-1.pdf`. **Falta probarlo en el robot** |
+| Robot funcionando al 100 % | **Solo se puede comprobar en el robot** |
+
+## Pruebas
+
+```bash
+source /opt/ros/jazzy/setup.bash && sh tools/host_tests/run.sh
+```
+
+Incluye cinemática, RST (contra la referencia en Python), simulación completa del firmware, intérprete de comandos, secuencia, panel sin pantalla y extremo a extremo con ROS 2 real. Medición del panel: `python3 tools/sim/bench_panel.py`.
+
+## Lo que falta verificar en el robot
+
+- Nada del RST, del paro por software ni de la activación por motor se ha ejecutado en la tarjeta. El firmware **compila** contra ESP-IDF con micro-ROS; no se ha cargado.
+- La inercia de los eslabones es una estimación: medirla y volver a correr `tools/rst/simulate.py`.
+- M3: sentido, encoder en J8, modelo y tornillo. La lista completa está en `docs/m3/REPORTE_M3.md`, sección 7.
+- Servo: señal por R40, ángulos y caída de los 5 V cuando se mueve.
+- El brazo no tiene eje z: comprueba la altura y cómo baja M3 con el tornillo. Tras cada tornillo, M3 sube 18,5 s girando al revés, lo que añade unos 5 minutos a los 16 huecos. Se supone que la punta se suelta sola del tornillo, así que la subida no lo afloja, y el simulador lo modela así. Compruébalo con el primer tornillo. Si no se suelta, según el simulador M3 desenrosca unas 10 de las 12 vueltas: cambia esa subida en `ros2/secuencia.yaml`.
+- Enlace a 460800 baudios (ver `UBUNTU_MICROROS.md`, sección 6).
+- Sobrepaso del final de carrera en Home: la simulación da 4,5°, cerca del tope duro simulado de 5°. Antes esa prueba exigía menos de 3° y fallaba sin que nadie lo viera.
+- `Guia_operacion_SCARA_ROS2.pdf` es anterior a estos cambios.
+
+---
+
+# Referencia del firmware
+
+Punto a punto, primera puesta en marcha y protocolo de texto. Control por teclado por serial (flechas + espacio como dead-man). La corriente de M3 se calcula con su modelo, porque el servo ocupa el sitio del sensor; el motor 3 arranca desactivado y se activa con `motor 3 on`.
 
 ## Estructura
 
@@ -10,6 +60,8 @@ Control por **teclado por serial** (flechas + espacio como dead-man). Motor 3 y 
 | `src/kinematics.c` | Cinemática directa/inversa 2R, dos codos, límites, singularidades | Sí (`tools/host_tests`) |
 | `src/traj.c` | Perfil trapezoidal sincronizado en espacio articular | Sí |
 | `src/pid.c` | PID + prealimentación de velocidad + fricción seca, anti-windup | Sí (simulación con modelo del motor) |
+| `src/rst.c` | Controlador RST (el activo por defecto) | Sí (`tools/host_tests/test_rst.c`, y contra Python) |
+| `src/screw.c` | Modelo de M3 y fases del atornillado | Sí (`tools/host_tests/test_screw.c`, `sim_control.c`) |
 | `src/control.c` | Lazo 1 kHz: Home, manual, punto a punto, fallas | Sí (simulación completa con planta, `sim_control.c`) |
 | `src/hal.c` | PWM TB6612, encoders PCNT, finales de carrera | **No** (necesita la tarjeta) |
 | `src/comms.c` | Protocolo de texto por serial | Parcial |
@@ -19,7 +71,7 @@ Control por **teclado por serial** (flechas + espacio como dead-man). Motor 3 y 
 ## Antes de mover nada: lo que hay que medir ([CAMBIAR] en `config.h` / `config.c`)
 
 Todo esto es PROVISIONAL, no son datos de tu robot:
-`KIN.l1`, `KIN.l2` (160/160 mm), `Z_FIJO_MM`, `RELACION_EXTRA_J1/J2` (1), `q_min/q_max/q_home` de cada articulación,
+`KIN.l1`, `KIN.l2` (120/70 mm), `Z_FIJO_MM`, `RELACION_EXTRA_J1/J2` (1), `q_min/q_max/q_home` de cada articulación,
 `HOME_ORDER_INIT`, pose de reposo (`PARK_*`), y los signos `enc_sign` / `motor_sign`.
 
 ## Terminal serie (monitor de PlatformIO o cualquier terminal)
@@ -81,9 +133,9 @@ Singularidades en `q2 = 0` y `±180°` (`det J = L1 L2 sin q2`): se rechaza `|q2
 | Movimiento manual por teclado | Hecho (flechas + espacio) |
 | Teach pendant con dead-man | Dead-man por teclado hecho; **un pendant físico no existe** (ver nota) |
 | Cinemática inversa en bajo nivel (C) | Hecho y probada en PC |
-| Consigna (x,y,z) desde Python con ROS 2 / micro-ROS | **Pendiente** (fase Ubuntu) |
+| Consigna (x,y,z) desde Python con ROS 2 / micro-ROS | Hecho: `/scara/goto` y `ros2/scara_client.py`. Probado con el simulador; **falta probarlo en el robot** |
 | Movimiento con retroalimentación de encoders | Hecho (PID), falta sintonizar en el robot |
-| Caracterización (5 puntos × 10 repeticiones) | Falta el script de automatización y el ground truth |
+| Caracterización (5 puntos × 10 repeticiones) | Script listo (`tools/characterize.py`); falta el ground truth y ejecutarlo |
 
 Nota: el reporte pide "teach pendant con dead man's switch" además del control por teclado/joystick. Confirma con el profesor si el
 dead-man por teclado cuenta como pendant; si no, el puerto J8 (encoder 3, libre) sirve para un botón físico.
@@ -95,7 +147,7 @@ simulación del lazo y simulación completa del firmware (Home, goto con error <
 
 ## Lo que NO está verificado
 
-- No se compiló contra ESP-IDF real (la red de donde se escribió no permitía bajar la plataforma de PlatformIO). Se revisó la sintaxis con cabeceras simuladas; puede haber errores de compilación que se ven en cuanto hagas `pio run`.
+- Compila contra ESP-IDF 5.3 con `pio run`, en modo micro-ROS y en modo texto, pero no se ha cargado en la tarjeta.
 - `hal.c` y los tiempos reales del hardware no se han probado en la tarjeta.
 - `teleop.py` no se ha ejecutado en Windows ni con teclado real; solo se probó su lógica de teclas.
 - Las ganancias salen de una simulación con el modelo del motor del documento de diseño, no del robot montado.
@@ -130,7 +182,8 @@ y la seguridad no cambian; la consigna (x, y, z) llega por `/scara/goto` y la va
 
 - Guía completa (instalación, agente, pruebas, WiFi, fallos): **`UBUNTU_MICROROS.md`**
 - Cliente Python: `ros2/scara_client.py` (home, goto, ang, cmd, state, monitor)
-- Teleop con dead-man por ROS 2: `ros2/scara_teleop_ros.py`
+- Panel de control: `ros2/scara_panel.py` (`docs/MANUAL.md`)
+- Respaldo liviano por teclado, sin gráficas ni paro: `ros2/scara_teleop_ros.py`
 - Pruebas en el PC: `sh tools/host_tests/run.sh` (incluye el intérprete de comandos y una comprobación de que la
   capa micro-ROS compila contra las firmas reales de `rclc`/`rmw_microxrcedds`). La ejecución con micro-ROS real
   está **sin verificar**.
