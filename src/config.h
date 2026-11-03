@@ -150,7 +150,7 @@ extern const screw_cfg_t   SCREW_CFG;
 
 /* Modelo de M3 (src/config.c) y atornillado. Tornillo supuesto M3 x 0,5 de 6 mm: [CAMBIAR] según el tornillo real. */
 #define SCREW_VUELTAS_META   12.0f   /* vueltas hasta que asienta la cabeza */
-#define SCREW_TORQUE_META    0.40f   /* N·m: apriete final */
+#define SCREW_TORQUE_META    0.04f   /* N·m: apriete final */
 #define SCREW_DUTY_RAPIDO    650.0f  /* el tope de PWM del firmware original (DUTY_MAX) */
 #define SCREW_DUTY_LENTO     300.0f
 #define SCREW_T_MAX_S        20.0f
