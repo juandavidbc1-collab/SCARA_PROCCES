@@ -210,7 +210,7 @@ proceso:
   placas_cm: {A: [29.1421, -5], D: [15, -15]}
   lado_mm: 38
   hueco_borde_mm: 3.5
-  servo: {abrir_s: 0.4, caida_s: 0.6}
+  servo: {arriba_s: 0.6, bajar_s: 0.6}
   tornillo: {vueltas: 12, torque_nm: 0.4}
 """
 
@@ -250,8 +250,8 @@ class TestProcess(unittest.TestCase):
         first_hole = kinds.index("screw")
         self.assertEqual(kinds[:2], ["cmd", "goto"], "codo y origen")
         self.assertEqual(kinds[2:first_hole + 1], ["goto", "wait", "cmd", "wait", "cmd", "wait", "screw"])
-        self.assertEqual(seq.steps[4]["text"], "servo abrir")
-        self.assertEqual(seq.steps[6]["text"], "servo cerrar")
+        self.assertEqual(seq.steps[4]["text"], "servo subir")
+        self.assertEqual(seq.steps[6]["text"], "servo bajar")
         self.assertEqual(kinds[-1], "goto", "termina en el origen")
         self.assertEqual((seq.steps[-1]["x"], seq.steps[-1]["y"]), (seq.steps[1]["x"], seq.steps[1]["y"]))
 
@@ -278,6 +278,21 @@ class TestProcess(unittest.TestCase):
         for h in seq.process.holes:
             self.assertIsNone(sq.point_problem(h["x"], h["y"], elbow=seq.process.elbow), h["label"])
 
+    def test_m3_cannot_go_below_its_limit(self):
+        self.assertEqual(len(self._load(PROCESO + "  m3: {paso_mm: 0.5, bajada_max_mm: 7}\n").process.holes), 8)
+        with self.assertRaises(sq.SequenceError) as e:
+            self._load(PROCESO + "  m3: {paso_mm: 0.5, bajada_max_mm: 5}\n")
+        self.assertIn("tornillo", str(e.exception))
+        with self.assertRaises(sq.SequenceError) as e:
+            self._load(PROCESO + "  m3: {paso_mm: 0.5, bajada_max_mm: 7}\n  ensayo: {potencia: 100, bajar_s: 10}\n")
+        self.assertIn("ensayo", str(e.exception))
+
+    def test_servo_goes_from_minus_180_to_180(self):
+        self.assertEqual(sq._parse_step({"servo": {"accion": -90}})["text"], "servo -90")
+        for bad in (200, -200, "abrir"):
+            with self.assertRaises(ValueError):
+                sq._parse_step({"servo": {"accion": bad}})
+
     def test_old_format_still_loads(self):
         steps, repeat = sq.load_sequence(self._write_old())
         self.assertEqual(repeat, 3)
@@ -285,13 +300,13 @@ class TestProcess(unittest.TestCase):
 
     def _write_old(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write("repeticiones: 3\npasos:\n  - ir: [120, 80]\n  - servo: {accion: abrir, tiempo: 0.5}\n  - atornillar: {vueltas: 8, torque: 0.3}\n  - codo: -1\n")
+            f.write("repeticiones: 3\npasos:\n  - ir: [120, 80]\n  - servo: {accion: subir, tiempo: 0.5}\n  - atornillar: {vueltas: 8, torque: 0.3}\n  - codo: -1\n")
         self.addCleanup(os.unlink, f.name)
         return f.name
 
     def test_step_forms_in_pasos(self):
         steps, _ = sq.load_sequence(self._write_old())
-        self.assertEqual(steps[1], {"kind": "cmd", "text": "servo abrir", "secs": 0.5, "desc": "Servo: abrir"})
+        self.assertEqual(steps[1], {"kind": "cmd", "text": "servo subir", "secs": 0.5, "desc": "Servo: subir"})
         self.assertEqual((steps[2]["kind"], steps[2]["vueltas"], steps[2]["torque"]), ("screw", 8.0, 0.3))
         self.assertEqual(steps[3]["text"], "elbow -1")
 
@@ -409,7 +424,7 @@ class TestScrewRunner(unittest.TestCase):
     def setUp(self):
         self.t = 0.0
         self.sent = []
-        self.steps = [{"kind": "cmd", "text": "servo abrir", "secs": 0.5, "desc": "s"},
+        self.steps = [{"kind": "cmd", "text": "servo subir", "secs": 0.5, "desc": "s"},
                       {"kind": "screw", "vueltas": 12.0, "torque": 0.4, "label": "A-H1", "desc": "s"},
                       {"kind": "screw", "vueltas": 12.0, "torque": 0.4, "label": "A-H3", "desc": "s"}]
         self.r = sq.SequenceRunner(self.steps, 1, self.sent.append, lambda: self.t)
@@ -423,7 +438,7 @@ class TestScrewRunner(unittest.TestCase):
 
     def test_command_step_waits_its_time(self):
         self.r.start()
-        self.assertEqual(self.sent, ["servo abrir"])
+        self.assertEqual(self.sent, ["servo subir"])
         self.t = 0.4; self.r.tick()
         self.assertEqual(self.r.index, 0)
         self.t = 0.5; self.r.tick()
@@ -458,10 +473,10 @@ class TestScrewRunner(unittest.TestCase):
         self.assertEqual(self.r.state, "aborted")
         self.assertEqual(self.sent[-1], "stop")
 
-    def test_stop_in_servo_step_closes_servo(self):
+    def test_stop_in_servo_step_lowers_driver(self):
         self.r.start()
         self.r.stop()
-        self.assertEqual(self.sent, ["servo abrir", "servo cerrar", "stop"])
+        self.assertEqual(self.sent, ["servo subir", "servo bajar", "stop"])
 
     def test_fault_during_screw_aborts_without_commands(self):
         self.r = sq.SequenceRunner(self.steps[1:], 1, self.sent.append, lambda: self.t)
@@ -543,12 +558,12 @@ proceso:
         self.assertEqual(sent[-1], "tool 0")
 
 
-class TestServoCierra(unittest.TestCase):
-    """El servo abre en un paso de 0 s y lo que sigue es la espera: cortar ahí no debe dejarlo soltando tornillos."""
+class TestServoBaja(unittest.TestCase):
+    """El servo sube en un paso de 0 s y lo que sigue es la espera: cortar ahí no debe dejar el destornillador arriba."""
     def setUp(self):
         self.t = 0.0
         self.sent = []
-        steps = [sq._cmd("servo abrir", "abrir"), sq._wait(0.4, "cayendo"), sq._cmd("servo cerrar", "cerrar"), sq._wait(0.6, "cayendo")]
+        steps = [sq._cmd("servo subir", "subir"), sq._wait(0.4, "cayendo"), sq._cmd("servo bajar", "bajar"), sq._wait(0.6, "cayendo")]
         self.r = sq.SequenceRunner(steps, 1, self.sent.append, lambda: self.t)
         self.r.start()
         self.r.tick()                    # ya abrió y está en la espera
@@ -557,17 +572,17 @@ class TestServoCierra(unittest.TestCase):
 
     def test_stop_during_the_wait_closes_it(self):
         self.r.stop()
-        self.assertEqual(self.sent, ["servo cerrar", "stop"])
+        self.assertEqual(self.sent, ["servo bajar", "stop"])
 
     def test_fault_during_the_wait_closes_it(self):
         self.r.on_event("#FALLA: algo")
         self.assertEqual(self.r.state, "aborted")
-        self.assertEqual(self.sent, ["servo cerrar"])
+        self.assertEqual(self.sent, ["servo bajar"])
 
     def test_error_during_the_wait_closes_it(self):
         self.r.on_event("#ERROR: algo")
         self.assertEqual(self.r.state, "aborted")
-        self.assertEqual(self.sent, ["servo cerrar"])
+        self.assertEqual(self.sent, ["servo bajar"])
 
     def test_nothing_extra_once_it_is_closed(self):
         self.t = 0.4; self.r.tick()      # termina la espera y cierra
@@ -577,12 +592,12 @@ class TestServoCierra(unittest.TestCase):
         self.r.stop()
         self.assertEqual(self.sent, ["stop"])
 
-    def test_an_angle_step_also_counts_as_open(self):
+    def test_an_angle_step_also_counts_as_up(self):
         sent = []
         r = sq.SequenceRunner([sq._parse_step({"servo": {"accion": 90, "tiempo": 0}}), sq._wait(1.0)], 1, sent.append, lambda: 0.0)
         r.start(); r.tick()
         r.stop()
-        self.assertEqual(sent, ["servo 90", "servo cerrar", "stop"])
+        self.assertEqual(sent, ["servo 90", "servo bajar", "stop"])
 
 
 if __name__ == "__main__":

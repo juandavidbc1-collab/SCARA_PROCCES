@@ -23,7 +23,7 @@ El simulador compila y corre el mismo C del firmware (`src/control.c`, `rst.c`, 
 | Gemelo digital en RViz | Hecho; `/tf` y `/joint_states` comprobados con el simulador. **Falta verlo con el robot real** |
 | Proceso repetitivo de la secuencia asignada | Hecho en `ros2/secuencia.yaml`: 16 huecos en 4 placas, con servo y atornillado. 16 de 16 `ok` en simulación. **Falta probarlo en el robot** |
 | Modelo de M3 de 200 rpm; corriente, presión y avance del tornillo | Hecho: `src/screw.c`. Motor supuesto Pololu 37D 50:1, sin medir. Ver `docs/m3/REPORTE_M3.md` |
-| Servo MG90S en lugar del sensor de corriente | Hecho en firmware (J13, GPIO32). **Falta probarlo: la señal pasa por R40 en serie** |
+| Servo del destornillador en lugar del sensor de corriente | Hecho en firmware (J13, GPIO32). **Falta probarlo y cambiar R40 y C14 en la placa** (ver `docs/MANUAL.md`) |
 | Manual de uso | `docs/MANUAL.md` y su copia en Notion |
 | Botón de paro de emergencia | En el firmware y el panel. El corte físico de 12 V es hardware, según `CONEXIONES_BORNERAS_v7-1.pdf`. **Falta probarlo en el robot** |
 | Robot funcionando al 100 % | **Solo se puede comprobar en el robot** |
@@ -41,7 +41,8 @@ Incluye cinemática, RST (contra la referencia en Python), simulación completa 
 - Nada del RST, del paro por software ni de la activación por motor se ha ejecutado en la tarjeta. El firmware **compila** contra ESP-IDF con micro-ROS; no se ha cargado.
 - La inercia de los eslabones es una estimación: medirla y volver a correr `tools/rst/simulate.py`.
 - M3: sentido, encoder en J8, modelo y tornillo. La lista completa está en `docs/m3/REPORTE_M3.md`, sección 7.
-- Servo: señal por R40, ángulos y caída de los 5 V cuando se mueve.
+- Servo: cambio de R40 y C14, ángulo de subida y caída de los 5 V cuando se mueve.
+- M3: medir `m3.paso_mm` y `m3.bajada_max_mm` en `ros2/secuencia.yaml`, para que el destornillador no llegue al suelo.
 - El brazo no tiene eje z: comprueba la altura y cómo baja M3 con el tornillo. Tras cada tornillo, M3 sube 18,5 s girando al revés, lo que añade unos 5 minutos a los 16 huecos. Se supone que la punta se suelta sola del tornillo, así que la subida no lo afloja, y el simulador lo modela así. Compruébalo con el primer tornillo. Si no se suelta, según el simulador M3 desenrosca unas 10 de las 12 vueltas: cambia esa subida en `ros2/secuencia.yaml`.
 - Enlace a 460800 baudios (ver `UBUNTU_MICROROS.md`, sección 6).
 - Sobrepaso del final de carrera en Home: la simulación da 4,5°, cerca del tope duro simulado de 5°. Antes esa prueba exigía menos de 3° y fallaba sin que nadie lo viera.

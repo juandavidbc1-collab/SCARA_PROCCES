@@ -300,14 +300,14 @@ int main(void)
     printf("\n== ESCENARIO 10: servo y atornillado ==\n");
     #define ESPERA_TORNILLO(max_s) do { for (int t = 0; t < (int)((max_s) * 1000) && screw_activo(&S.screw); t++) correr(0.001, "m3", false); correr(0.3, "m3", false); } while (0)
     reset_sim(); correr(0.1, "boot", false);
-    CHECK(g_servo_deg == SERVO_CERRADO_DEG, "el servo arranca cerrado");
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "el servo arranca en 0: destornillador abajo");
     ctl_cmd_screw(0, 0); correr(0.05, "m3", false);
     CHECK(!screw_activo(&S.screw) && g_tool_max == 0, "M3 desactivado: no atornilla");
     ctl_cmd_motor(2, true); correr(0.01, "m3", false);
-    ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.01, "s", false);
-    CHECK(g_servo_deg == SERVO_ABIERTO_DEG, "servo abre");
-    ctl_cmd_servo(SERVO_CERRADO_DEG); correr(0.01, "s", false);
-    CHECK(!ctl_cmd_servo(200.0f) && !ctl_cmd_servo(-5.0f), "angulo de servo fuera de rango se rechaza");
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "s", false);
+    CHECK(g_servo_deg == SERVO_ARRIBA_DEG, "el servo sube");
+    ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.01, "s", false);
+    CHECK(!ctl_cmd_servo(200.0f) && !ctl_cmd_servo(-200.0f), "angulo de servo fuera de rango se rechaza");
 
     g_m3_th_tornillo = NAN;               /* el tornillo de la prueba de arriba ya no está */
     ctl_cmd_screw(0, 0); correr(0.01, "m3", false);
@@ -316,7 +316,7 @@ int main(void)
     CHECK(S.screw.res == SCREW_R_SIN_APRIETE, "sin soltar tornillo con el servo: %s", screw_result_str(S.screw.res));
     CHECK(g_tool_duty == 0, "M3 queda apagado");
 
-    ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_CERRADO_DEG); correr(0.1, "s", false);
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
     ctl_cmd_screw(0, 0); correr(0.15, "m3", false);
     {
         ctl_status_t st; ctl_get_status(&st);
@@ -346,25 +346,29 @@ int main(void)
         CHECK(st.screw_fase == SCREW_FIN && st.tool_i == 0.0f, "motor quieto: corriente 0");
     }
 
-    g_screw_mode = SIM_TORNILLO_ATASCO; ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_CERRADO_DEG); correr(0.1, "s", false);
+    g_screw_mode = SIM_TORNILLO_ATASCO; ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
     ctl_cmd_screw(0, 0); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
     CHECK(S.screw.res == SCREW_R_TRABADO, "atasco a pocas vueltas: %s", screw_result_str(S.screw.res));
-    g_screw_mode = SIM_TORNILLO_BARRIDO; ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_CERRADO_DEG); correr(0.1, "s", false);
+    g_screw_mode = SIM_TORNILLO_BARRIDO; ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
     ctl_cmd_screw(0, 0); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
     CHECK(S.screw.res == SCREW_R_SIN_APRIETE, "rosca barrida: %s", screw_result_str(S.screw.res));
-    g_screw_mode = SIM_TORNILLO_NORMAL; g_m3_enc_ok = false; ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_CERRADO_DEG); correr(0.1, "s", false);
+    g_screw_mode = SIM_TORNILLO_NORMAL; g_m3_enc_ok = false; ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
     ctl_cmd_screw(0, 0); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
     CHECK(S.screw.res != SCREW_R_OK && S.screw.res != SCREW_R_NONE, "encoder de M3 sin senal: nunca dice ok (%s)", screw_result_str(S.screw.res));
     g_m3_enc_ok = true;
 
     /* paro y otras interrupciones a mitad del tornillo */
-    ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.1, "s", false);
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false);
+    ctl_cmd_screw(0, 0); correr(0.01, "m3", false);
+    CHECK(!screw_activo(&S.screw), "con el destornillador arriba no atornilla");
+    ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
     ctl_cmd_screw(0, 0); correr(1.0, "m3", false);
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "m3", false);
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG && screw_activo(&S.screw), "mientras atornilla, el destornillador no sube");
     ctl_cmd_estop(); correr(0.002, "paro", false);
     CHECK(g_tool_duty == 0 && S.screw.res == SCREW_R_CANCELADO, "paro: M3 parado y tornillo cancelado");
-    CHECK(g_servo_deg == SERVO_CERRADO_DEG, "paro: el servo se cierra para no soltar mas tornillos");
-    ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.02, "paro", false);
-    CHECK(g_servo_deg == SERVO_CERRADO_DEG, "durante el paro el servo no se abre");
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.02, "paro", false);
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "durante el paro el destornillador no sube");
     ctl_cmd_screw(0, 0); correr(0.05, "paro", false);
     CHECK(!screw_activo(&S.screw), "durante el paro no atornilla");
     ctl_cmd_clear(); correr(0.01, "c", false);
@@ -465,10 +469,14 @@ int main(void)
         }
     }
     reset_sim(); correr(0.1, "servo", false);
-    ctl_cmd_servo(SERVO_ABIERTO_DEG); correr(0.01, "servo", false);
-    CHECK(g_servo_deg == SERVO_ABIERTO_DEG, "servo abierto antes de la falla");
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "servo", false);
+    ctl_cmd_estop(); correr(0.002, "paro", false);
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "un paro baja el destornillador");
+    reset_sim(); correr(0.1, "servo", false);
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "servo", false);
+    CHECK(g_servo_deg == SERVO_ARRIBA_DEG, "destornillador arriba antes de la falla");
     set_fault(F_STALL); correr(0.01, "servo", false);
-    CHECK(g_servo_deg == SERVO_CERRADO_DEG, "una falla cierra el servo");
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "una falla baja el destornillador");
 
     printf(fallos ? "\n%d FALLOS\n" : "\nTODO OK\n", fallos);
     return fallos != 0;

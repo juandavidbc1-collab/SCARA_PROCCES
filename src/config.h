@@ -30,8 +30,8 @@
 #define PIN_M3_PWM    GPIO_NUM_21
 #define PIN_M3_IN1    GPIO_NUM_23
 #define PIN_M3_IN2    GPIO_NUM_22
-/* Servo MG90S en J13 (donde iba el ACS712): pin 1 = 5 V, pin 2 = señal, pin 3 = GND. La señal pasa por R40 (10 k) en serie
- * hacia GPIO32; R41 (22 k) y C14 (100 nF) quedan a GND. Si el servo no responde o tiembla, puentea R40. */
+/* Servo en J13 (donde iba el ACS712): pin 1 = 5 V, pin 2 = señal, pin 3 = GND. La señal sale de GPIO32 y pasa por R40 hacia J13.
+ * En la placa: R40 cambia de 10 k a 330 ohm, C14 se retira y R41 (22 k a GND) se queda para que el servo no salte al reiniciar. */
 #define PIN_SERVO     GPIO_NUM_32
 
 #define PIN_ENC1_A    GPIO_NUM_33
@@ -155,10 +155,12 @@ extern const screw_cfg_t   SCREW_CFG;
 #define SCREW_DUTY_LENTO     300.0f
 #define SCREW_T_MAX_S        20.0f
 
-/* Servo MG90S: 50 Hz, pulso de 500 a 2400 us para 0 a 180 grados. [CAMBIAR] los ángulos al montar el dispensador. */
+/* Servo: sube el destornillador para que baje un tornillo y luego lo vuelve a bajar. 50 Hz, pulso de 500 a 2400 us para -180 a 180 grados.
+ * Siempre arranca en 0 grados (destornillador abajo). [CAMBIAR] SERVO_ARRIBA_DEG (ángulo y signo) al montarlo. */
 #define SERVO_HZ             50
 #define SERVO_US_MIN         500.0f
 #define SERVO_US_MAX         2400.0f
+#define SERVO_GRADOS_MIN     (-180.0f)
 #define SERVO_GRADOS_MAX     180.0f
-#define SERVO_CERRADO_DEG    0.0f
-#define SERVO_ABIERTO_DEG    90.0f
+#define SERVO_ABAJO_DEG      0.0f
+#define SERVO_ARRIBA_DEG     90.0f

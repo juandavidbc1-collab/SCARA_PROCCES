@@ -5,7 +5,7 @@
  *
  * Modelo: dos motores Pololu 37D (R, L, Ke, J, B de la hoja de datos) con reductor 100.37:1, fricción seca, encoder
  * cuantizado, finales de carrera y tope duro 5 grados más allá de ellos. Ejes desacoplados.
- * M3: Pololu 37D 50:1 con un tornillo que cae cuando el servo se abre y se aprieta al asentar la cabeza.
+ * M3: Pololu 37D 50:1 con un tornillo que cae cuando el servo sube el destornillador y se aprieta al asentar la cabeza.
  */
 #pragma once
 /* ---------------- reloj simulado y stubs de FreeRTOS ---------------- */
@@ -82,8 +82,8 @@ int32_t hal_tool_enc_raw(void)
 }
 void hal_servo_set_deg(float deg)
 {
-    /* Al abrirse, cae un tornillo nuevo sobre el hueco; tiene que llegar a M3 antes de atornillar. */
-    if (deg > SERVO_GRADOS_MAX / 4 && g_servo_deg <= SERVO_GRADOS_MAX / 4 && g_servo_deg >= 0.0f) {
+    /* Al subir el destornillador, cae un tornillo nuevo sobre el hueco; tiene que llegar a M3 antes de atornillar. */
+    if (fabsf(deg) > fabsf(SERVO_ARRIBA_DEG) / 2 && fabsf(g_servo_deg) <= fabsf(SERVO_ARRIBA_DEG) / 2) {
         g_m3_th_tornillo = g_screw_mode == SIM_TORNILLO_NO_CAE ? NAN : g_m3_th;
         g_m3_barrido = false;
     }

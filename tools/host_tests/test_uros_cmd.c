@@ -24,7 +24,7 @@ bool ctl_cmd_rst(int j, const float g[7]) { n_rst++; last_rst_j = j; for (int i 
 void ctl_get_rst(int j, float o[7]) { for (int i = 0; i < 7; i++) o[i] = (float)(j + i); }
 ctrl_t ctl_get_ctrl(void) { return CTRL_RST; }
 static int n_servo, n_screw; static float last_servo, last_screw[2];
-bool ctl_cmd_servo(float d) { if (d < 0 || d > 180) return false; n_servo++; last_servo = d; return true; }
+bool ctl_cmd_servo(float d) { if (d < -180 || d > 180) return false; n_servo++; last_servo = d; return true; }
 bool ctl_cmd_screw(float v, float t) { if (v < 0) return false; n_screw++; last_screw[0] = v; last_screw[1] = t; return true; }
 
 void ctl_get_status(ctl_status_t *s) { memset(s, 0, sizeof *s); s->mode = M_HOLD; s->homed[0] = s->homed[1] = true; }
@@ -109,9 +109,10 @@ int main(void)
     ok = uros_cmd_exec("rstform orig", r, sizeof r);  CHECK(ok && last_form == RST_FORM_ORIG, "rstform orig");
     n_form = 3;
     ok = uros_cmd_exec("servo 90", r, sizeof r);      CHECK(ok && last_servo == 90.0f, "servo 90");
-    ok = uros_cmd_exec("servo abrir", r, sizeof r);   CHECK(ok && last_servo == SERVO_ABIERTO_DEG, "servo abrir");
-    ok = uros_cmd_exec("servo cerrar", r, sizeof r);  CHECK(ok && last_servo == SERVO_CERRADO_DEG, "servo cerrar");
+    ok = uros_cmd_exec("servo subir", r, sizeof r);   CHECK(ok && last_servo == SERVO_ARRIBA_DEG, "servo subir");
+    ok = uros_cmd_exec("servo bajar", r, sizeof r);  CHECK(ok && last_servo == SERVO_ABAJO_DEG, "servo bajar");
     ok = uros_cmd_exec("servo 200", r, sizeof r);     CHECK(!ok && n_servo == 3 && strstr(r, "#ERROR"), "servo fuera de rango");
+    ok = uros_cmd_exec("servo -90", r, sizeof r);     CHECK(ok && last_servo == -90.0f, "servo con angulo negativo");
     ok = uros_cmd_exec("screw", r, sizeof r);         CHECK(ok && n_screw == 1 && last_screw[0] == 0.0f, "screw usa los valores por defecto");
     ok = uros_cmd_exec("screw 8 0.3", r, sizeof r);   CHECK(ok && last_screw[0] == 8.0f && fabsf(last_screw[1] - 0.3f) < 1e-6f, "screw vueltas torque");
     ok = uros_cmd_exec("screw -1 0.3", r, sizeof r);  CHECK(!ok && n_screw == 2 && strstr(r, "#ERROR"), "screw fuera de rango");

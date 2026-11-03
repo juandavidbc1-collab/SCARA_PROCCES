@@ -220,7 +220,7 @@ static void set_fault(fault_t f)
     S.await_reach = false;
     S.jog_lock = true;
     tool_apagar();
-    servo_mover(SERVO_CERRADO_DEG);
+    servo_mover(SERVO_ABAJO_DEG);
     emit("#FALLA: %s. Motores apagados. Escribe 0 (o clear) para borrarla.", ctl_fault_str(f));
 }
 
@@ -234,7 +234,7 @@ static void entrar_paro(void)
         if (en_home) S.homed[j] = false;              /* un Home a medias no deja referencia */
     }
     tool_apagar();
-    servo_mover(SERVO_CERRADO_DEG);
+    servo_mover(SERVO_ABAJO_DEG);
     S.mode = M_FAULT;
     S.fault = F_ESTOP;
     S.fault_t_us = now_us();
@@ -457,12 +457,16 @@ static void do_cmd(const cmd_t *c)
         break;
 
     case C_SERVO:
-        if (S.mode == M_FAULT && c->g[0] != SERVO_CERRADO_DEG) { emit("#ERROR: con una falla o paro activo el servo no se abre."); break; }
+        if (c->g[0] != SERVO_ABAJO_DEG) {
+            if (S.mode == M_FAULT) { emit("#ERROR: con una falla o paro activo el destornillador no sube."); break; }
+            if (screw_activo(&S.screw)) { emit("#ERROR: el destornillador no sube mientras atornilla."); break; }
+        }
         servo_mover(c->g[0]);
         break;
 
     case C_SCREW:
         if (S.mode == M_FAULT) { emit("#ERROR: no se atornilla con una falla o paro activo."); break; }
+        if (S.servo_deg != SERVO_ABAJO_DEG) { emit("#ERROR: baja el destornillador antes de atornillar."); break; }
         if (!S.tool_en) { emit("#ERROR: M3 esta desactivado (usa motor 3 on)."); break; }
         if (screw_activo(&S.screw)) { emit("#ERROR: M3 ya esta atornillando."); break; }
         if (S.mode != M_OFF && S.mode != M_HOLD) { emit("#ERROR: el brazo debe estar quieto para atornillar (modo %s).", ctl_mode_str(S.mode)); break; }
@@ -875,7 +879,7 @@ void ctl_init(void)
     S.ctrl = CTRL_DEFAULT;
     S.form = RST_FORM_DEFAULT;
     S.tool_en = TOOL_ACTIVO_INIT;
-    servo_mover(SERVO_CERRADO_DEG);
+    servo_mover(SERVO_ABAJO_DEG);
     {
         const bool en0[NJ] = MOTORES_INIT;
         for (int j = 0; j < NJ; j++) S.en[j] = en0[j];
@@ -972,7 +976,7 @@ bool ctl_cmd_tool(float pct)
 
 bool ctl_cmd_servo(float deg)
 {
-    if (!(deg >= 0.0f && deg <= SERVO_GRADOS_MAX)) return false;
+    if (!(deg >= SERVO_GRADOS_MIN && deg <= SERVO_GRADOS_MAX)) return false;
     cmd_t c = { .t = C_SERVO, .g = { deg } };
     return enviar(&c);
 }

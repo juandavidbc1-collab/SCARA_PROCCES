@@ -348,10 +348,10 @@ class PanelCase(unittest.TestCase):
 
     def test_screwdriver_buttons_send_commands(self):
         self.link.sent.clear()
-        self.p.btn_servo_open.click()
-        self.p.btn_servo_close.click()
+        self.p.btn_servo_up.click()
+        self.p.btn_servo_down.click()
         self.p.btn_screw_here.click()
-        self.assertEqual(self.link.sent[:3], ["servo abrir", "servo cerrar", "screw 12 0.4"])
+        self.assertEqual(self.link.sent[:3], ["servo subir", "servo bajar", "screw 12 0.4"])
 
     def test_screw_fault_injection_only_in_sim(self):
         self.assertIsNotNone(self.p.btn_inj_screw["barrido"])
