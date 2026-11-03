@@ -30,11 +30,16 @@
 #define PIN_M3_PWM    GPIO_NUM_21
 #define PIN_M3_IN1    GPIO_NUM_23
 #define PIN_M3_IN2    GPIO_NUM_22
+/* Servo MG90S en J13 (donde iba el ACS712): pin 1 = 5 V, pin 2 = señal, pin 3 = GND. La señal pasa por R40 (10 k) en serie
+ * hacia GPIO32; R41 (22 k) y C14 (100 nF) quedan a GND. Si el servo no responde o tiembla, puentea R40. */
+#define PIN_SERVO     GPIO_NUM_32
 
 #define PIN_ENC1_A    GPIO_NUM_33
 #define PIN_ENC1_B    GPIO_NUM_25
 #define PIN_ENC2_A    GPIO_NUM_26
 #define PIN_ENC2_B    GPIO_NUM_27
+#define PIN_ENC3_A    GPIO_NUM_14
+#define PIN_ENC3_B    GPIO_NUM_13
 
 #define PIN_FC1_MIN   GPIO_NUM_36
 #define PIN_FC1_MAX   GPIO_NUM_39
@@ -66,6 +71,9 @@ typedef struct {
     float kp, ki, kd, kff, fric;   /* ver pid.h */
 } joint_cfg_t;
 extern const joint_cfg_t JC[NJ];
+#include "screw.h"
+extern const screw_model_t M3_MODEL;
+extern const screw_cfg_t   SCREW_CFG;
 
 /* Pololu 37D: 64 cuentas por vuelta del motor (x4) con reductor ~100.37:1 */
 #define ENC_CUENTAS_SALIDA   6424.0f
@@ -123,3 +131,34 @@ extern const joint_cfg_t JC[NJ];
 #define PULSE_MS          350
 
 #define TELE_PERIODO_MS   100
+
+/* Controlador RST: corre cada RST_PERIOD_TICKS del lazo de 1 kHz. Con Ts = 1 ms y la forma "orig" da el mismo PWM que
+ * el PID original. Si cambias Ts, vuelve a generar src/rst_defaults.h con tools/rst/simulate.py. */
+#define RST_PERIOD_TICKS  1
+#define RST_TS_S          (RST_PERIOD_TICKS / (float)CONTROL_HZ)
+#define CTRL_DEFAULT      CTRL_RST   /* CTRL_PID: el PID anterior, de respaldo en el robot */
+
+/* Motor 3 (atornillador). Arranca desactivado; se activa con "motor 3 on". */
+#define MOTORES_INIT      { true, true }
+#define TOOL_ACTIVO_INIT  false
+#define TOOL_DUTY_MAX     DUTY_MAX
+#define TOOL_MOTOR_SIGN   (+1)       /* [CAMBIAR] tras probar el sentido: duty > 0 debe apretar */
+#define TOOL_ENC_SIGN     (+1)       /* [CAMBIAR] apretar debe sumar vueltas */
+#define TOOL_ENC_CUENTAS  3200.0f    /* 64 cuentas por vuelta del motor x 50:1. [CAMBIAR] si una vuelta no da 3200 */
+#define TOOL_VEL_TAU_S    0.020f     /* filtro de la velocidad de M3 */
+#define TOOL_MAX_ON_MS    10000      /* sin renovar "tool" en este tiempo, M3 se apaga (comunicación perdida) */
+
+/* Modelo de M3 (src/config.c) y atornillado. Tornillo supuesto M3 x 0,5 de 6 mm: [CAMBIAR] según el tornillo real. */
+#define SCREW_VUELTAS_META   12.0f   /* vueltas hasta que asienta la cabeza */
+#define SCREW_TORQUE_META    0.40f   /* N·m: apriete final */
+#define SCREW_DUTY_RAPIDO    650.0f  /* el tope de PWM del firmware original (DUTY_MAX) */
+#define SCREW_DUTY_LENTO     300.0f
+#define SCREW_T_MAX_S        20.0f
+
+/* Servo MG90S: 50 Hz, pulso de 500 a 2400 us para 0 a 180 grados. [CAMBIAR] los ángulos al montar el dispensador. */
+#define SERVO_HZ             50
+#define SERVO_US_MIN         500.0f
+#define SERVO_US_MAX         2400.0f
+#define SERVO_GRADOS_MAX     180.0f
+#define SERVO_CERRADO_DEG    0.0f
+#define SERVO_ABIERTO_DEG    90.0f
