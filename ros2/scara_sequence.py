@@ -7,7 +7,7 @@ Dos formatos (ver ros2/secuencia.yaml):
 
     repeticiones: 1
     proceso:                   # atornillar todos los huecos de unas placas; se expande a pasos
-      base_cm, origen_cm, codo, placas_cm, lado_mm, hueco_borde_mm, asentar_s, servo, tornillo, ensayo
+      base_cm, origen_cm, codo, placas_cm, lado_mm, hueco_borde_mm, asentar_s, servo, tornillo, m3, ensayo
 
     repeticiones: 3            # 0 = hasta que se detenga a mano
     pasos:
@@ -15,12 +15,12 @@ Dos formatos (ver ros2/secuencia.yaml):
       - angulos: [20, 90]      # q1, q2 [grados]
       - esperar: 0.5           # segundos
       - codo: -1
-      - servo: {accion: abrir, tiempo: 0.4}     # abrir, cerrar o grados
+      - servo: {accion: subir, tiempo: 0.4}     # subir, bajar o grados (-180 a 180); sube el destornillador para que baje el tornillo
       - atornillar: {vueltas: 12, torque: 0.4}
       - m3: {potencia: 40, tiempo: 1.5}         # motor 3 sin control: -100..100 %, durante un tiempo [s]
 
 Si el robot informa una falla, rechaza un punto o un tornillo no queda bien, la secuencia aborta. Lo único que manda después
-es apagar M3 y cerrar el servo, si estaban en marcha.
+es apagar M3 y bajar el destornillador, si estaban en marcha.
 
 Ensayo: load_sequence_full(path, ensayo=True) recorre los mismos huecos sin servo ni tornillo. En cada uno, M3 baja un
 tiempo y sube con la misma potencia durante el mismo tiempo. Solo aplica a los archivos con sección "proceso".
@@ -41,6 +41,7 @@ TOOL_RENEW_S = 5.0                    # debe ser menor que TOOL_MAX_ON_MS del fi
 ENSAYO_PCT, ENSAYO_S = 40.0, 3.5      # potencia y tiempo de bajada del ensayo si el archivo no los da
 SUBIR_PCT, SUBIR_VPS = 35.0, 0.647    # el PWM de apretar (229), y las vueltas por segundo a ese PWM según el modelo de M3
 RESULTADOS_BUENOS = ("ok", "ensayado")
+SCREW_VUELTAS_EXTRA = 2.0             # el firmware corta el tornillo a las vueltas pedidas + 2 (src/control.c)
 
 _TORNILLO = re.compile(r"#TORNILLO: (\w+) vueltas=(-?[\d.]+) prof=(-?[\d.]+)mm avance=(-?[\d.]+)% torque=(-?[\d.]+)Nm "
                        r"fuerza=(-?[\d.]+)N presion=(-?[\d.]+)MPa corriente=(-?[\d.]+)A t=(-?[\d.]+)s")
@@ -135,10 +136,10 @@ def _parse_step(raw):
         return _cmd("elbow %+d" % val, "Codo %+d" % val)
     if key == "servo":
         if not isinstance(val, dict) or "accion" not in val:
-            raise ValueError("servo necesita {accion: abrir | cerrar | grados, tiempo: s}")
+            raise ValueError("servo necesita {accion: subir | bajar | grados, tiempo: s}")
         acc, secs = val["accion"], val.get("tiempo", 0.0)
-        if not (acc in ("abrir", "cerrar") or (isinstance(acc, (int, float)) and 0 <= acc <= 180)):
-            raise ValueError("la acción del servo es abrir, cerrar o de 0 a 180 grados")
+        if not (acc in ("subir", "bajar") or (isinstance(acc, (int, float)) and -180 <= acc <= 180)):
+            raise ValueError("la acción del servo es subir, bajar o de -180 a 180 grados")
         if not isinstance(secs, (int, float)) or secs < 0:
             raise ValueError("el tiempo del servo debe ser positivo")
         return _cmd("servo %s" % acc, "Servo: %s" % acc, float(secs))
@@ -183,6 +184,12 @@ def _positive(raw, key, name, default=None):
     return float(val)
 
 
+def _m3_turns(pct, secs):
+    """Vueltas de M3 a ese % en lazo abierto y sin carga: modelo de src/config.c con TOOL_DUTY_MAX = 650."""
+    volts = pct / 100.0 * 650.0 / 1023.0 * 12.0
+    return max(0.0, volts - 0.2 * 2.1818) / 0.5522 / (2.0 * math.pi) * secs
+
+
 def _rehearse_hole(label, pct, secs, settle):
     """M3 baja y sube por tiempo: no hay medición de altura. La espera final deja que se detenga antes de mover el brazo."""
     down = {"kind": "tool", "pct": pct, "secs": secs, "label": label, "desc": "Bajar M3 en %s (%g %%, %g s)" % (label, pct, secs)}
@@ -213,7 +220,7 @@ def _expand_process(raw, ensayo=False):
     if not isinstance(placas, dict) or not placas:
         raise ValueError("placas_cm necesita al menos una placa, por ejemplo A: [29, -5]")
     servo, tornillo = raw.get("servo") or {}, raw.get("tornillo") or {}
-    t_open, t_fall = _positive(servo, "abrir_s", "servo.abrir_s", 0.4), _positive(servo, "caida_s", "servo.caida_s", 0.6)
+    t_up, t_down = _positive(servo, "arriba_s", "servo.arriba_s", 0.6), _positive(servo, "bajar_s", "servo.bajar_s", 0.6)
     settle = _positive(raw, "asentar_s", "asentar_s", 0.3)
     vueltas, torque = _positive(tornillo, "vueltas", "tornillo.vueltas"), _positive(tornillo, "torque_nm", "tornillo.torque_nm")
     bloque = raw.get("ensayo") or {}
@@ -225,6 +232,11 @@ def _expand_process(raw, ensayo=False):
     up_s = _positive(tornillo, "subir_s", "tornillo.subir_s", vueltas / SUBIR_VPS)
     if not 0 < up_pct <= 100 or up_s == 0:
         raise ValueError("tornillo: subir_pct de 0 a 100 y subir_s mayor que 0")
+    if raw.get("m3"):
+        paso, tope = _positive(raw["m3"], "paso_mm", "m3.paso_mm"), _positive(raw["m3"], "bajada_max_mm", "m3.bajada_max_mm")
+        for name, turns in (("tornillo", vueltas + SCREW_VUELTAS_EXTRA), ("ensayo", _m3_turns(pct, secs))):
+            if turns * paso > tope:
+                raise ValueError("%s: M3 bajaría hasta %.1f mm y m3.bajada_max_mm es %g" % (name, turns * paso, tope))
 
     notes = []
     ox, oy = _pair(raw.get("origen_cm"), "origen_cm")
@@ -257,8 +269,8 @@ def _expand_process(raw, ensayo=False):
             if ensayo:
                 steps += _rehearse_hole(label, pct, secs, settle)
             else:
-                steps += [_cmd("servo abrir", "Servo: abrir"), _wait(t_open, "Tornillo cayendo"),
-                          _cmd("servo cerrar", "Servo: cerrar"), _wait(t_fall, "Tornillo cayendo"),
+                steps += [_cmd("servo subir", "Servo: subir"), _wait(t_up, "Tornillo cayendo"),
+                          _cmd("servo bajar", "Servo: bajar"), _wait(t_down, "Destornillador bajando"),
                           _screw(vueltas, torque, label)] + _raise_m3(label, up_pct, up_s, settle)
     steps.append(_goto(ox, oy, "Volver al origen"))
     return steps, Process(boards, holes, (ox, oy), elbow, side), notes
@@ -317,7 +329,7 @@ class SequenceRunner:
         self.results = []                 # un diccionario por tornillo terminado
         self._arrived = False
         self._screw_result = None
-        self._servo_open = False
+        self._servo_up = False
         self._t_step = self._t_cycle = self._t_renew = 0.0
 
     @property
@@ -336,7 +348,7 @@ class SequenceRunner:
         self.index = self.cycles_done = 0
         self.cycle_times = []
         self.results = []
-        self._servo_open = False
+        self._servo_up = False
         self._t_cycle = self.clock()
         self._begin_step()
 
@@ -415,7 +427,7 @@ class SequenceRunner:
         elif step["kind"] == "cmd":
             self.send(step["text"])
             if step["text"].startswith("servo "):
-                self._servo_open = step["text"] != "servo cerrar"
+                self._servo_up = step["text"] != "servo bajar"
         elif step["kind"] == "screw":
             self.send("screw %s %s" % (_fmt(step["vueltas"]), _fmt(step["torque"])))
         elif step["kind"] == "tool":
@@ -438,9 +450,9 @@ class SequenceRunner:
         step = self.steps[self.index]
         if step["kind"] == "tool":
             self.send("tool 0")
-        if self._servo_open:                 # abrir dura 0 s: casi siempre se llega aquí en la espera de después
-            self.send("servo cerrar")
-            self._servo_open = False
+        if self._servo_up:                   # subir dura 0 s: casi siempre se llega aquí en la espera de después
+            self.send("servo bajar")
+            self._servo_up = False
 
     def _abort(self, reason, send_stop):
         self._tool_off_if_needed()

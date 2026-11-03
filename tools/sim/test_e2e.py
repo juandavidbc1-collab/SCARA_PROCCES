@@ -190,7 +190,7 @@ class E2E(unittest.TestCase):
         self.assertEqual(self.runner.state, "done", self.runner.reason)
         self.assertEqual([r["resultado"] for r in self.runner.results], ["ensayado"] * 16)
         self.assertFalse([e for e in self.n.ev[n_ev:] if e.startswith("#TORNILLO")])
-        self.assertEqual(max(servos), 0.0, "el servo no se abre")
+        self.assertEqual(max(map(abs, servos)), 0.0, "el destornillador no sube")
         self.assertGreater(max(duties), 200.0, "baja")
         self.assertLess(min(duties), -200.0, "sube")
 
@@ -214,7 +214,7 @@ class E2E(unittest.TestCase):
                 watch(self.n.state)
             step = self.runner.steps[self.runner.index] if self.runner.running else None
             if step and step is not last:
-                if step.get("text") == "servo abrir":
+                if step.get("text") == "servo subir":
                     g = self.runner.steps[self.runner.index - 2]
                     self.errors.append(math.hypot(self.n.state[2] - g["x"], self.n.state[3] - g["y"]))
                 last = step
@@ -303,9 +303,9 @@ class M3Height(unittest.TestCase):
             run(5000)
         cmd("tool 0")
         run(500)
-        cmd("servo abrir")
+        cmd("servo subir")
         run(400)
-        cmd("servo cerrar")
+        cmd("servo bajar")
         run(600)
         cmd("screw 12 0.4")
         for _ in range(60):

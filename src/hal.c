@@ -114,9 +114,9 @@ int32_t hal_tool_enc_raw(void)
 
 void hal_servo_set_deg(float deg)
 {
-    if (deg < 0.0f) deg = 0.0f;
+    if (deg < SERVO_GRADOS_MIN) deg = SERVO_GRADOS_MIN;
     if (deg > SERVO_GRADOS_MAX) deg = SERVO_GRADOS_MAX;
-    const float us = SERVO_US_MIN + (SERVO_US_MAX - SERVO_US_MIN) * deg / SERVO_GRADOS_MAX;
+    const float us = SERVO_US_MIN + (SERVO_US_MAX - SERVO_US_MIN) * (deg - SERVO_GRADOS_MIN) / (SERVO_GRADOS_MAX - SERVO_GRADOS_MIN);
     const float periodo_us = 1e6f / SERVO_HZ;
     ledc_duty(SERVO_CH, (int)(us / periodo_us * ((1 << SERVO_BITS) - 1)));
 }
@@ -190,7 +190,7 @@ void hal_init(void)
     for (int j = 0; j < NJ; j++) enc[j] = init_encoder(JC[j].enc_a, JC[j].enc_b);
     enc_tool = init_encoder(PIN_ENC3_A, PIN_ENC3_B);
 
-    /* 6) servo en J13: temporizador propio de 50 Hz. Arranca con el ángulo cerrado para no soltar un tornillo. */
+    /* 6) servo en J13: temporizador propio de 50 Hz. Arranca en 0 grados: destornillador abajo. */
     ledc_timer_config_t ts = {
         .speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = SERVO_BITS, .timer_num = LEDC_TIMER_1,
         .freq_hz = SERVO_HZ, .clk_cfg = LEDC_AUTO_CLK,
@@ -201,5 +201,5 @@ void hal_init(void)
         .timer_sel = LEDC_TIMER_1, .duty = 0, .hpoint = 0,
     };
     ESP_ERROR_CHECK(ledc_channel_config(&cs));
-    hal_servo_set_deg(SERVO_CERRADO_DEG);
+    hal_servo_set_deg(SERVO_ABAJO_DEG);
 }

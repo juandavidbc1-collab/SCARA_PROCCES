@@ -1,6 +1,6 @@
 # Manual de uso del robot SCARA
 
-Robot SCARA de dos eslabones (120 mm y 70 mm) con ESP32, controlado desde un PC con Ubuntu y ROS 2. Alcance: de 50 a 190 mm desde la base. Atornilla con un motor de 200 rpm (M3); un servo MG90S suelta cada tornillo.
+Robot SCARA de dos eslabones (120 mm y 70 mm) con ESP32, controlado desde un PC con Ubuntu y ROS 2. Alcance: de 50 a 190 mm desde la base. Atornilla con un motor de 200 rpm (M3); un servo sube el destornillador para que baje cada tornillo y luego lo vuelve a bajar.
 
 ## Antes de empezar: seguridad
 
@@ -89,11 +89,11 @@ Al soltar ESPACIO se detiene. Si estás escribiendo en un cuadro, el teclado no 
 En cada hueco, el robot:
 
 1. Mueve el brazo al hueco y espera a que se asiente.
-2. Abre el servo para soltar el tornillo y lo cierra.
+2. Sube el destornillador con el servo para que baje el tornillo, y lo vuelve a bajar.
 3. Atornilla con M3 y guarda el resultado en la tabla de huecos.
 4. Sube M3 girando al revés durante 18,5 s, las mismas 12 vueltas. Se supone que la punta se suelta sola del tornillo.
 
-Al terminar vuelve al origen. Si un tornillo no queda bien, hay una falla o el robot rechaza un punto, la secuencia aborta y te dice por qué. Después solo apaga M3 y cierra el servo. Si M3 quedó abajo, el panel te avisa: **súbelo a mano antes de mover el brazo**. Revisa ese hueco antes de volver a iniciar: la secuencia empieza de nuevo desde el primero.
+Al terminar vuelve al origen. Si un tornillo no queda bien, hay una falla o el robot rechaza un punto, la secuencia aborta y te dice por qué. Después solo apaga M3 y baja el destornillador. Si M3 quedó abajo, el panel te avisa: **súbelo a mano antes de mover el brazo**. Revisa ese hueco antes de volver a iniciar: la secuencia empieza de nuevo desde el primero.
 
 Si cambias el archivo, pulsa **Recargar**. Si el brazo no alcanza un hueco, el panel te dice cuál. Esto se ajusta en la sección `proceso`:
 
@@ -105,8 +105,9 @@ proceso:
   placas_cm: {A: [29.1421, -5], B: [26.1803, -10], C: [20.8788, -13.8], D: [15, -15]}
   lado_mm: 38
   hueco_borde_mm: 3.5
-  servo: {abrir_s: 0.4, caida_s: 0.6}
+  servo: {arriba_s: 0.6, bajar_s: 0.6}
   tornillo: {vueltas: 12, torque_nm: 0.4, subir_pct: 35, subir_s: 18.5}
+  m3: {paso_mm: 0.5, bajada_max_mm: 7}      # medir: el archivo se rechaza si M3 bajaría más que esto
 ```
 
 **Ensayo sin tornillos.** Sirve para probar el recorrido sin servo ni tornillos:
@@ -127,7 +128,7 @@ pasos:
   - angulos: [20, 90]                        # q1, q2 en grados
   - esperar: 0.5                             # segundos
   - codo: -1
-  - servo: {accion: abrir, tiempo: 0.4}      # abrir, cerrar o grados
+  - servo: {accion: subir, tiempo: 0.4}      # subir, bajar o grados (-180 a 180)
   - atornillar: {vueltas: 12, torque: 0.4}
   - m3: {potencia: 40, tiempo: 1.5}          # motor 3 sin control: % y segundos
 ```
@@ -153,7 +154,9 @@ En la pestaña **Motores** hay un interruptor por motor. El botón muestra lo qu
 
 ![Atornillador](img/panel_atornillador.png)
 
-En la pestaña **Atornillador** puedes abrir y cerrar el servo y atornillar en el punto donde esté el brazo. El brazo debe estar quieto y, mientras M3 atornilla, no se mueve.
+En la pestaña **Atornillador** puedes subir y bajar el destornillador y atornillar en el punto donde esté el brazo. El brazo debe estar quieto y, mientras M3 atornilla, ni el brazo ni el destornillador se mueven. Con el destornillador arriba no se puede atornillar.
+
+**Conexión del servo (J13).** Pin 1: +5 V, cable rojo. Pin 2: señal, cable naranja. Pin 3: GND, cable marrón. En la placa, cambia R40 por 330 Ω, retira C14, deja R41 y pon 470 µF / 16 V entre los pines 1 (+) y 3 (-). El servo arranca en 0 grados con el destornillador abajo. Para hallar el ángulo de subida, escribe `servo 20` en la línea de comandos del panel, ve subiendo poco a poco y guarda el valor en `SERVO_ARRIBA_DEG`.
 
 No hay sensor de corriente: corriente, torque, fuerza y presión salen del modelo del motor, del PWM y del encoder de M3. Durante el arranque, torque, fuerza y presión se muestran en 0 porque el motor está acelerando. **Son estimaciones hasta que calibres el modelo** con `docs/m3/REPORTE_M3.md`. La profundidad sale del encoder.
 
@@ -181,9 +184,9 @@ Pulsa **Apagar motores** (tecla O), cierra el panel y corta los 12 V.
 
 ![Paro de emergencia](img/panel_paro.png)
 
-**Paro de emergencia.** Frena, deja los motores libres, cancela el tornillo, cierra el servo y queda enclavado. Para continuar: revisa el robot, pulsa **Rearmar** y da la orden de nuevo. La referencia se conserva, salvo que el paro interrumpa un Home. Si mantenías el dead-man, suéltalo antes de volver a mover.
+**Paro de emergencia.** Frena, deja los motores libres, cancela el tornillo, baja el destornillador y queda enclavado. Para continuar: revisa el robot, pulsa **Rearmar** y da la orden de nuevo. La referencia se conserva, salvo que el paro interrumpa un Home. Si mantenías el dead-man, suéltalo antes de volver a mover.
 
-**Si la secuencia se corta con el servo abierto.** Al detenerla o si el robot informa una falla o un error, el servo se cierra solo.
+**Si la secuencia se corta con el destornillador arriba.** Al detenerla o si el robot informa una falla o un error, baja solo.
 
 **Paro físico.** Corta los 12 V de motores. El ESP32 sigue encendido y, si el brazo estaba en movimiento, declara falla porque el eje no responde.
 

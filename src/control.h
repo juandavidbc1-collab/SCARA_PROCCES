@@ -15,7 +15,7 @@
  *  - Paro de emergencia: no pasa por la cola de órdenes. Freno, motores libres, STBY = 0, enclavado en
  *    FAULT (F_ESTOP) hasta "clear". Conserva el Home salvo que interrumpa un Home en curso.
  *  - Motor desactivado: driver libre, encoder contando, sin supervisión. Home solo con los activos.
- *  - Atornillado (M3): el brazo se queda quieto. Paro, falla, detener, apagar o desactivar M3 lo cancelan. Paro y falla cierran el servo.
+ *  - Atornillado (M3): el brazo se queda quieto. Paro, falla, detener, apagar o desactivar M3 lo cancelan. Paro y falla bajan el destornillador (servo a 0).
  */
 #pragma once
 #include <stdbool.h>
@@ -78,7 +78,7 @@ void ctl_cmd_estop(void);     /* paro de emergencia: siempre se atiende en el si
 bool ctl_cmd_motor(int m, bool on);   /* m: 0 = J1, 1 = J2, 2 = M3 */
 bool ctl_motor_enabled(int m);
 bool ctl_cmd_tool(float pct);         /* M3 en lazo abierto: -100..100 %. Hay que renovarla antes de TOOL_MAX_ON_MS */
-bool ctl_cmd_servo(float deg);        /* 0 a SERVO_GRADOS_MAX */
+bool ctl_cmd_servo(float deg);        /* SERVO_GRADOS_MIN a SERVO_GRADOS_MAX */
 bool ctl_cmd_screw(float vueltas, float torque);   /* 0 = valor por defecto. Al terminar emite "#TORNILLO: ..." */
 bool ctl_cmd_ctrl(ctrl_t c);          /* solo con el robot en OFF o HOLD */
 bool ctl_cmd_rstform(rst_form_t f);   /* solo con el robot en OFF o HOLD; ambos ejes */

@@ -61,10 +61,10 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
             snprintf(reply, n, "#ERROR: usa rstform pos|inc|mask|orig"); return false;
         }
     }
-    if (!strcmp(l, "servo abrir") || !strcmp(l, "servo cerrar") || sscanf(l, "servo %f", &f[0]) == 1) {
-        float deg = !strcmp(l, "servo abrir") ? SERVO_ABIERTO_DEG : !strcmp(l, "servo cerrar") ? SERVO_CERRADO_DEG : f[0];
+    if (!strcmp(l, "servo subir") || !strcmp(l, "servo bajar") || sscanf(l, "servo %f", &f[0]) == 1) {
+        float deg = !strcmp(l, "servo subir") ? SERVO_ARRIBA_DEG : !strcmp(l, "servo bajar") ? SERVO_ABAJO_DEG : f[0];
         if (ctl_cmd_servo(deg)) { snprintf(reply, n, "#OK: servo a %.0f grados", deg); return true; }
-        snprintf(reply, n, "#ERROR: servo va de 0 a %.0f grados (o abrir / cerrar)", SERVO_GRADOS_MAX); return false;
+        snprintf(reply, n, "#ERROR: servo va de %.0f a %.0f grados (o subir / bajar)", SERVO_GRADOS_MIN, SERVO_GRADOS_MAX); return false;
     }
     if (!strcmp(l, "screw") || sscanf(l, "screw %f %f", &f[0], &f[1]) == 2) {
         float v = !strcmp(l, "screw") ? 0.0f : f[0], t = !strcmp(l, "screw") ? 0.0f : f[1];
@@ -90,7 +90,7 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
         return true;
     }
     if (!strcmp(l, "help")) {
-        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | servo g/abrir/cerrar | screw [v t] | ctrl pid/rst | rstform pos/inc/mask/orig | rst | gain");
+        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | servo g/subir/bajar | screw [v t] | ctrl pid/rst | rstform pos/inc/mask/orig | rst | gain");
         return true;
     }
     if (sscanf(l, "goto %f %f %f", &f[0], &f[1], &f[2]) == 3) return motion_goto_xyz(f[0], f[1], f[2], reply, n) == MOTION_OK;
