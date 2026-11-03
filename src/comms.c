@@ -13,6 +13,7 @@
 #include "hal.h"
 #include "kinematics.h"
 #include "motion.h"
+#include "uros_cmd.h"
 
 #define RAD2DEG (180.0f / (float)M_PI)
 #define DEG2RAD ((float)M_PI / 180.0f)
@@ -73,6 +74,11 @@ static void print_help(void)
            "  ang q1 q2               ir a angulos en grados    ej: ang 20 90\n"
            "  stop | off | clear      detener y mantener | apagar motores | borrar falla\n"
            "  elbow +1 | elbow -1     elegir codo preferido\n"
+           "  estop                   paro de emergencia (se rearma con clear)\n"
+           "  motor 1|2|3 on|off      activar o desactivar un motor (3 = atornillador)\n"
+           "  tool pct                motor 3: -100 a 100 %%\n"
+           "  ctrl pid|rst            controlador activo;  rstform pos|inc|mask  forma del RST\n"
+           "  rst                     ver el RST;  rst j kp ki kd s1 b c kff  para cambiarlo\n"
            "  gain                    ver ganancias;  gain j kp ki kd kff fric  para cambiarlas (j = 1 o 2)\n"
            "  pulse j                 pulso corto para comprobar el sentido del motor j\n"
            "  tele 1 | tele 0         telemetria en vivo (cualquier tecla la detiene)\n"
@@ -198,7 +204,12 @@ static void procesar(char *l)
     if (!strncmp(l, "cfg", 3)) { print_cfg(); return; }
     if (!strncmp(l, "menu", 4) || !strcmp(l, "m")) { print_menu(); return; }
     if (!strncmp(l, "help", 4) || *l == '?') { print_help(); return; }
-    printf("#ERROR: comando desconocido '%s'. Escribe m (menu) o help.\n", l);
+    /* estop, motor, tool, ctrl, rstform, rst: mismo intérprete que ROS 2 */
+    {
+        char reply[200];
+        (void)uros_cmd_exec(l, reply, sizeof reply);
+        printf("%s\n", reply);
+    }
 }
 
 /* ------------------------------------------------------------------ menú numérico y entradas con argumentos */

@@ -84,7 +84,7 @@ Para depurar con texto vuelve a `python3 tools/uros_select.py text`.
 ```bash
 # cerrar cualquier monitor serie abierto; el puerto es de uno solo
 docker run -it --rm -v /dev:/dev --privileged --net=host \
-    microros/micro-ros-agent:jazzy serial --dev /dev/ttyUSB0 -b 115200 -v6
+    microros/micro-ros-agent:jazzy serial --dev /dev/ttyUSB0 -b 460800 -v6
 ```
 
 Resetea el ESP32 (botón EN). El agente debe mostrar que se creó una sesión y los tópicos. En otra terminal:
@@ -93,7 +93,7 @@ Resetea el ESP32 (botón EN). El agente debe mostrar que se creó una sesión y 
 source /opt/ros/jazzy/setup.bash
 ros2 node list                          # /scara/scara_esp32
 ros2 topic list                         # /scara/goto /scara/jog /scara/cmd /scara/state /scara/ee_position /scara/event
-ros2 topic echo /scara/state            # 13 números, 20 Hz
+ros2 topic echo /scara/state            # 24 números, 20 Hz
 ros2 topic echo /scara/event            # eventos (#LLEGO, #HOME, #ERROR, ...)
 ```
 
@@ -122,7 +122,8 @@ ros2 topic pub --once /scara/cmd  std_msgs/msg/String "{data: 'home'}"
 ### Manual con teclado y dead-man
 
 ```bash
-python3 ros2/scara_teleop_ros.py            # ESPACIO (mantener) + flechas;  h Home, s detener, o apagar, c borrar falla, q salir
+python3 ros2/scara_panel.py                 # panel de control (ver docs/MANUAL.md)
+python3 ros2/scara_teleop_ros.py            # respaldo liviano: ESPACIO (mantener) + flechas;  h Home, s detener, o apagar, c borrar falla, q salir
 ```
 
 - Con sesión **X11** y `pynput` detecta de verdad cuándo sueltas una tecla.
@@ -142,10 +143,20 @@ python3 ros2/scara_teleop_ros.py            # ESPACIO (mantener) + flechas;  h H
 | `/scara/jog` | `geometry_msgs/Vector3` (best-effort) | PC → ESP32 | x = dead-man (>0.5), y = dir J1, z = dir J2 (−1/0/+1), a 25 Hz |
 | `/scara/cmd` | `std_msgs/String` | PC → ESP32 | `home`, `stop`, `off`, `clear`, `ang a b`, `elbow ±1`, `gain …`, `pulse 1`, `status`, `help` |
 | `/scara/state` | `std_msgs/Float32MultiArray` (best-effort) | ESP32 → PC | `[q1°, q2°, x, y, modo, falla, home1, home2, bits_topes, qref1°, qref2°, duty1, duty2]`, 20 Hz |
-| `/scara/ee_position` | `geometry_msgs/Point` (best-effort) | ESP32 → PC | posición medida del efector [mm] |
+| `/scara/ee_position` | `geometry_msgs/Point` (best-effort) | ESP32 → PC | posición medida del efector [mm], a 5 Hz |
 | `/scara/event` | `std_msgs/String` | ESP32 → PC | `#LLEGO …`, `#HOME …`, `#ERROR …`, `#FALLA …`, `#INFO …` |
 
 `modo`: 0 OFF, 1 HOMING, 2 HOLD, 3 MOVE, 4 JOG, 5 PULSE, 6 FAULT.
+
+Campos nuevos al final de `/scara/state`: índice 13 motores activos (bit 0 J1, bit 1 J2, bit 2 M3), índice 14 controlador (0 PID; 1, 2, 3, 4, 5 RST posicional, incremental, enmascarado, PID original, a medida), índice 15 PWM de M3. Falla 6 = paro de emergencia.
+
+Atornillado, calculado con el modelo de M3: 16 corriente [A], 17 torque [N·m], 18 fuerza [N], 19 presión [MPa], 20 vueltas, 21 profundidad [mm], 22 servo [grados], 23 fase (0 sin atornillar, 1 rápido, 2 lento, 3 apriete, 4 terminado).
+
+Comandos nuevos de `/scara/cmd`: `estop`, `motor 1|2|3 on|off`, `tool pct`, `servo grados|abrir|cerrar`, `screw [vueltas torque]`, `ctrl pid|rst`, `rstform pos|inc|mask|orig`, `rst`, `rst j kp ki kd s1 b c kff`.
+
+Al terminar cada tornillo, `/scara/event` publica `#TORNILLO: ok vueltas=12.18 prof=6.09mm avance=101% torque=0.382Nm fuerza=587N presion=37.4MPa corriente=1.18A t=7.9s`. El resultado puede ser `ok`, `sin_apriete`, `trabado`, `flojo`, `tiempo`, `sobrecorriente` o `cancelado`.
+
+**Velocidad del enlace.** El transporte serial pasó a 460800 baudios para que el panel responda mejor. El firmware y `-b` del agente deben coincidir. Si tu `sdkconfig.esp32dev` es anterior, ejecuta `python3 tools/uros_select.py serial`, luego `pio run -t fullclean` y `pio run -t upload`. Para volver: `python3 tools/uros_select.py serial --baud 115200` y `-b 115200`.
 
 ## 7. Por WiFi (sin cable USB) — siguiente fase
 
