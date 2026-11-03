@@ -269,7 +269,7 @@ Secuencia: `ros2/secuencia.yaml`. Base del brazo en (15; 0) cm, placas de 38 mm 
     L.append("""## 7. Lo que falta medir o confirmar
 
 - Modelo y relación de M3, y sus valores R, Ke y Kt.
-- Tornillo real: paso, largo, material y torque de apriete. Valores actuales: 12 vueltas, 0,4 N·m.
+- Tornillo real: paso, largo, material y torque de apriete. Valores actuales: 12 vueltas, 0,04 N·m.
 - Sentido de M3 y del encoder (`TOOL_MOTOR_SIGN`, `TOOL_ENC_SIGN`) y cuentas por vuelta (`TOOL_ENC_CUENTAS`).
 - Ángulos del servo (`SERVO_CERRADO_DEG`, `SERVO_ABIERTO_DEG`).
 - **Señal del servo:** va por R40 (10 kΩ) en serie. Si tiembla o no responde, puentea R40.
