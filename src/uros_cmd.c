@@ -15,8 +15,9 @@ static void cmd_status(char *reply, size_t n)
 {
     ctl_status_t s; ctl_get_status(&s);
     float x, y; kin_fk(&KIN, s.q[0], s.q[1], &x, &y);
-    snprintf(reply, n, "#INFO: [%s] q1=%.2f q2=%.2f deg x=%.1f y=%.1f mm home J1:%d J2:%d falla:%s",
+    snprintf(reply, n, "#INFO: [%s] q1=%.2f q2=%.2f deg x=%.1f y=%.1f mm home J1:%d J2:%d motores J1:%d J2:%d M3:%d falla:%s",
              ctl_mode_str(s.mode), s.q[0] * RAD2DEG, s.q[1] * RAD2DEG, x, y, s.homed[0], s.homed[1],
+             s.en & 1, (s.en >> 1) & 1, (s.en >> 2) & 1,
              s.fault == F_NONE ? "ninguna" : ctl_fault_str(s.fault));
 }
 
@@ -29,7 +30,7 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
     l[k] = 0;
     while (k && (unsigned char)l[k - 1] <= ' ') l[--k] = 0;              /* espacios finales / \n */
 
-    float f[5]; int j;
+    float f[6]; int j;
     if (!strcmp(l, "home")) {
         if (ctl_cmd_home()) { snprintf(reply, n, "#OK: home solicitado"); return true; }
         snprintf(reply, n, "#ERROR: home rechazado (falla activa o movimiento en curso)"); return false;
@@ -38,8 +39,58 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
     if (!strcmp(l, "off"))   { ctl_cmd_off();   snprintf(reply, n, "#OK: motores apagados"); return true; }
     if (!strcmp(l, "clear")) { ctl_cmd_clear(); snprintf(reply, n, "#OK: falla borrada"); return true; }
     if (!strcmp(l, "status")) { cmd_status(reply, n); return true; }
+    if (!strcmp(l, "estop")) { ctl_cmd_estop(); snprintf(reply, n, "#OK: paro de emergencia solicitado"); return true; }
+    {
+        char w[8];
+        if (sscanf(l, "motor %d %7s", &j, w) == 2) {
+            bool on = !strcmp(w, "on");
+            if ((on || !strcmp(w, "off")) && j >= 1 && j <= NJ + 1 && ctl_cmd_motor(j - 1, on)) {
+                snprintf(reply, n, "#OK: motor %d %s", j, on ? "activar" : "desactivar");
+                return true;
+            }
+            snprintf(reply, n, "#ERROR: usa motor 1|2|3 on|off"); return false;
+        }
+        if (sscanf(l, "ctrl %7s", w) == 1) {
+            bool pid = !strcmp(w, "pid");
+            if ((pid || !strcmp(w, "rst")) && ctl_cmd_ctrl(pid ? CTRL_PID : CTRL_RST)) { snprintf(reply, n, "#OK: cambio a %s solicitado", pid ? "PID" : "RST"); return true; }
+            snprintf(reply, n, "#ERROR: usa ctrl pid|rst"); return false;
+        }
+        if (sscanf(l, "rstform %7s", w) == 1) {
+            int fm = !strcmp(w, "pos") ? RST_FORM_POS : !strcmp(w, "inc") ? RST_FORM_INC : !strcmp(w, "mask") ? RST_FORM_MASK : !strcmp(w, "orig") ? RST_FORM_ORIG : -1;
+            if (fm >= 0 && ctl_cmd_rstform((rst_form_t)fm)) { snprintf(reply, n, "#OK: forma %s solicitada", RST_FORM_NAME[fm]); return true; }
+            snprintf(reply, n, "#ERROR: usa rstform pos|inc|mask|orig"); return false;
+        }
+    }
+    if (!strcmp(l, "servo abrir") || !strcmp(l, "servo cerrar") || sscanf(l, "servo %f", &f[0]) == 1) {
+        float deg = !strcmp(l, "servo abrir") ? SERVO_ABIERTO_DEG : !strcmp(l, "servo cerrar") ? SERVO_CERRADO_DEG : f[0];
+        if (ctl_cmd_servo(deg)) { snprintf(reply, n, "#OK: servo a %.0f grados", deg); return true; }
+        snprintf(reply, n, "#ERROR: servo va de 0 a %.0f grados (o abrir / cerrar)", SERVO_GRADOS_MAX); return false;
+    }
+    if (!strcmp(l, "screw") || sscanf(l, "screw %f %f", &f[0], &f[1]) == 2) {
+        float v = !strcmp(l, "screw") ? 0.0f : f[0], t = !strcmp(l, "screw") ? 0.0f : f[1];
+        if (ctl_cmd_screw(v, t)) { snprintf(reply, n, "#OK: atornillado solicitado"); return true; }
+        snprintf(reply, n, "#ERROR: usa screw [vueltas 0-40, torque 0-1.5 Nm]"); return false;
+    }
+    if (sscanf(l, "tool %f", &f[0]) == 1) {
+        if (ctl_cmd_tool(f[0])) { snprintf(reply, n, "#OK: M3 a %.0f %%", f[0]); return true; }
+        snprintf(reply, n, "#ERROR: tool va de -100 a 100 %%"); return false;
+    }
+    {
+        float g[7];
+        if (sscanf(l, "rst %d %f %f %f %f %f %f %f", &j, &g[0], &g[1], &g[2], &g[3], &g[4], &g[5], &g[6]) == 8) {
+            if (ctl_cmd_rst(j - 1, g)) { snprintf(reply, n, "#OK: RST del eje %d actualizado", j); return true; }
+            snprintf(reply, n, "#ERROR: RST fuera de rango o eje invalido (eje 1 o 2)"); return false;
+        }
+    }
+    if (!strcmp(l, "rst")) {
+        float a[7], b[7];
+        ctl_get_rst(0, a); ctl_get_rst(1, b);
+        snprintf(reply, n, "#RST: J1 kp=%.1f ki=%.1f kd=%.2f s1=%.4f b=%.2f c=%.2f kff=%.1f | J2 kp=%.1f ki=%.1f kd=%.2f s1=%.4f b=%.2f c=%.2f kff=%.1f",
+                 a[0], a[1], a[2], a[3], a[4], a[5], a[6], b[0], b[1], b[2], b[3], b[4], b[5], b[6]);
+        return true;
+    }
     if (!strcmp(l, "help")) {
-        snprintf(reply, n, "#INFO: home stop off clear | goto x y [z] | ang q1 q2 | elbow +1/-1 | pulse 1/2 | gain [j kp ki kd kff fric] | status");
+        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | servo g/abrir/cerrar | screw [v t] | ctrl pid/rst | rstform pos/inc/mask/orig | rst | gain");
         return true;
     }
     if (sscanf(l, "goto %f %f %f", &f[0], &f[1], &f[2]) == 3) return motion_goto_xyz(f[0], f[1], f[2], reply, n) == MOTION_OK;

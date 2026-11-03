@@ -30,6 +30,18 @@ const char *ctl_mode_str(ctl_mode_t m) { static const char *s[] = { "OFF", "HOMI
 const char *ctl_fault_str(fault_t f) { (void)f; return "ninguna"; }
 bool ctl_event_pop(char *b, size_t n_, uint32_t w) { (void)b; (void)n_; (void)w; return false; }
 bool hal_stby_get(void) { return false; }
+static int n_estop;
+void ctl_cmd_estop(void) { n_estop++; }
+bool ctl_cmd_motor(int j, bool on) { (void)j; (void)on; return true; }
+bool ctl_motor_enabled(int j) { (void)j; return true; }
+bool ctl_cmd_tool(float p) { (void)p; return true; }
+bool ctl_cmd_ctrl(ctrl_t c) { (void)c; return true; }
+bool ctl_cmd_rstform(rst_form_t f) { (void)f; return true; }
+bool ctl_cmd_rst(int j, const float g[7]) { (void)j; (void)g; return true; }
+void ctl_get_rst(int j, float o[7]) { (void)j; for (int i = 0; i < 7; i++) o[i] = 0; }
+ctrl_t ctl_get_ctrl(void) { return CTRL_RST; }
+bool ctl_cmd_servo(float d) { (void)d; return true; }
+bool ctl_cmd_screw(float v, float t) { (void)v; (void)t; return true; }
 void ctl_get_limits(int j, float *lo, float *hi) { *lo = JC[j].q_min; *hi = JC[j].q_max; }
 
 static int fallos = 0;
@@ -43,6 +55,10 @@ int main(void)
     marca("1) escribir 'home' + Enter (CRLF): se ve lo escrito y se ejecuta una sola vez");
     show_prompt(); tipea("home\r\n");
     CHECK(n_home == 1, "home se ejecuto una vez (el LF del CRLF se ignora)");
+
+    marca("1b) comandos nuevos por el mismo interprete: 'estop' escrito llega al control");
+    tipea("estop\r");
+    CHECK(n_estop == 1, "estop por el protocolo de texto");
 
     marca("2) backspace: escribo 'hox', borro, sigo con 'me'");
     show_prompt(); tipea("hox\x7f" "me\r");

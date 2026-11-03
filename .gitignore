@@ -6,3 +6,4 @@ sdkconfig.*
 !sdkconfig.defaults
 __pycache__/
 *.csv
+tools/sim/build/

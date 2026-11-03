@@ -69,7 +69,7 @@ def main():
     ap.add_argument("--password")
     ap.add_argument("--agent-ip")
     ap.add_argument("--agent-port", default="8888")
-    ap.add_argument("--baud", type=int, default=115200, help="solo serial; debe coincidir con '-b' del agente")
+    ap.add_argument("--baud", type=int, default=460800, help="solo serial; debe coincidir con '-b' del agente")
     a = ap.parse_args()
 
     if a.modo == "wifi" and not (a.ssid and a.password is not None and a.agent_ip):

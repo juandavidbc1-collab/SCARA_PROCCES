@@ -20,9 +20,9 @@ menu "SCARA firmware"
 
     config SCARA_UROS_BAUD
         int "Velocidad del transporte serial de micro-ROS (baudios)"
-        default 115200
+        default 460800
         depends on SCARA_COMMS_UROS
         help
-            Debe coincidir con "-b" del agente micro-ROS. Sube a 460800 o 921600 cuando todo funcione.
+            Debe coincidir con "-b" del agente micro-ROS. Con 115200 el enlace se satura: si baja a ese valor el panel se nota lento.
 
 endmenu
