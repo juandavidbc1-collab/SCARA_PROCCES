@@ -466,10 +466,12 @@ class ControlPanel(QtWidgets.QWidget):
         f, c = card("Probar a mano")
         h = QtWidgets.QHBoxLayout()
         h.addWidget(muted("Servo"))
-        self.btn_servo_up = self._button("Subir", lambda: self.send("servo subir"), "Sube el destornillador para que baje un tornillo")
-        self.btn_servo_down = self._button("Bajar", lambda: self.send("servo bajar"))
+        self.btn_servo_up = self._button("Subir", lambda: self.send("servo subir"), "Servo a +180 grados: baja el tornillo")
+        self.btn_servo_down = self._button("Bajar", lambda: self.send("servo bajar"), "Servo a -180 grados: baja el destornillador")
+        self.btn_servo_zero = self._button("A 0", lambda: self.send("servo 0"))
         h.addWidget(self.btn_servo_up)
         h.addWidget(self.btn_servo_down)
+        h.addWidget(self.btn_servo_zero)
         h.addStretch()
         h.addWidget(muted("Vueltas"))
         self.edit_turns = self._edit(str(SCREW_DEFAULT[0]), 50)
@@ -479,6 +481,15 @@ class ControlPanel(QtWidgets.QWidget):
         h.addWidget(self.edit_torque)
         self.btn_screw_here = self._button("Atornillar aquí", self.do_screw, "Hay que activar M3 en la pestaña Motores")
         h.addWidget(self.btn_screw_here)
+        c.addLayout(h)
+        h = QtWidgets.QHBoxLayout()
+        h.addWidget(muted("M3"))
+        self.btn_m3 = {}
+        for key, txt, tip in (("home", "Buscar tope", "Sube hasta el tope y pone ahí el cero. Hazlo antes del proceso"), ("subir", "Arriba", "106 mm"),
+                              ("trabajo", "A 31 mm", "La altura entre huecos"), ("bajar", "A 6 mm", "La altura de atornillar: revisa que no toque nada")):
+            self.btn_m3[key] = self._button(txt, lambda _=False, k=key: self.send("m3 " + k), tip)
+            h.addWidget(self.btn_m3[key])
+        h.addStretch()
         c.addLayout(h)
         v.addWidget(f)
 
@@ -511,9 +522,17 @@ class ControlPanel(QtWidgets.QWidget):
         self.lbl_seqnote = muted("")
         self.lbl_seqnote.setWordWrap(True)
         c.addWidget(self.lbl_seqnote)
-        self.chk_ensayo = nofocus(QtWidgets.QCheckBox("Ensayo: sin servo ni tornillo, M3 solo baja y sube en cada hueco"))
+        h = QtWidgets.QHBoxLayout()
+        h.addWidget(muted("PCB"))
+        self.combo_pcb = nofocus(QtWidgets.QComboBox())
+        self.combo_pcb.addItems(["Todas", "1 (A)", "2 (B)", "3 (C)", "4 (D)"])
+        self.combo_pcb.currentIndexChanged.connect(lambda _=0: self._seq_toggle_rehearsal())
+        h.addWidget(self.combo_pcb)
+        self.chk_ensayo = nofocus(QtWidgets.QCheckBox("Ensayo: sin mover el servo; M3 baja y sube igual"))
         self.chk_ensayo.clicked.connect(self._seq_toggle_rehearsal)
-        c.addWidget(self.chk_ensayo)
+        h.addWidget(self.chk_ensayo)
+        h.addStretch()
+        c.addLayout(h)
         self.seq_list = nofocus(QtWidgets.QListWidget())
         c.addWidget(self.seq_list, 1)
         self.hole_table = nofocus(QtWidgets.QTableWidget(0, len(HOLE_COLS)))
@@ -744,7 +763,7 @@ class ControlPanel(QtWidgets.QWidget):
     def _seq_load(self, path):
         self.lbl_seqfile.setText(path)
         try:
-            seq = sq.load_sequence_full(path, ensayo=self.chk_ensayo.isChecked())
+            seq = sq.load_sequence_full(path, ensayo=self.chk_ensayo.isChecked(), pcb=self.combo_pcb.currentIndex() or None)
         except sq.SequenceError as e:
             self.lbl_seq.setText("No se pudo cargar: %s" % e)
             self.steps = []
@@ -755,6 +774,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.lbl_seqnote.setText(" ".join(seq.notes))
         self._show_process(seq.process)
         self.chk_ensayo.setEnabled(seq.process is not None)
+        self.combo_pcb.setEnabled(seq.process is not None)
 
     def _seq_toggle_rehearsal(self):
         repeat = self.spin_repeat.value()
@@ -785,7 +805,7 @@ class ControlPanel(QtWidgets.QWidget):
         vals = [status] + [HOLE_FMT[k] % res[k] if k in res else "" for k in HOLE_FIELDS]
         for col, text in enumerate(vals, start=1):
             item = QtWidgets.QTableWidgetItem(text)
-            if col == 1 and status not in ("Pendiente", "Atornillando", "Ensayando"):
+            if col == 1 and status not in ("Pendiente", "Atornillando", "Ensayando", "En proceso"):
                 item.setForeground(QtGui.QColor("#4ade80" if status in sq.RESULTADOS_BUENOS else "#ff8a80"))
             self.hole_table.setItem(row, col, item)
 
@@ -819,7 +839,7 @@ class ControlPanel(QtWidgets.QWidget):
             return
         st = self.state
         moves = any(s["kind"] in ("goto", "ang") for s in self.steps)
-        screws = any(s["kind"] in ("screw", "tool") for s in self.steps)
+        screws = any(s["kind"] in ("screw", "tool", "m3") for s in self.steps)
         if st is None:
             self.lbl_seq.setText("No se puede iniciar: sin datos del robot.")
             self._texts[id(self.lbl_seq)] = self.lbl_seq.text()
@@ -831,7 +851,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.lbl_seq.setText("No se puede iniciar: primero haz Home.")
             return
         if screws and not st.m3_on:
-            self.lbl_seq.setText("No se puede iniciar: activa M3 en la pestaña Motores.")
+            self.lbl_seq.setText("No se puede iniciar: pulsa Buscar tope de M3 en la pestaña Atornillador.")
             return
         for label, row in self.hole_rows.items():
             self._hole_row(row, "Pendiente", {})
@@ -842,6 +862,7 @@ class ControlPanel(QtWidgets.QWidget):
         self.btn_seq_start.setEnabled(False)
         self.btn_seq_stop.setEnabled(True)
         self.chk_ensayo.setEnabled(False)
+        self.combo_pcb.setEnabled(False)
 
     def seq_stop(self):
         if self.runner:
@@ -860,7 +881,7 @@ class ControlPanel(QtWidgets.QWidget):
                 "stopped": "Detenida en el ciclo %d, paso %d." % (r.cycles_done + 1, r.index + 1),
                 "aborted": "ABORTADA en el paso %d: %s" % (r.index + 1, r.reason)}[r.state]
         if r.tool_left_down:
-            text += " M3 puede haber quedado abajo: súbelo a mano antes de mover el brazo."
+            text += " M3 puede haber quedado abajo: súbelo con Arriba, en la pestaña Atornillador, antes de mover el brazo."
         self._set(self.lbl_seq, text)
         if r.running:
             if self.seq_list.currentRow() != r.index:
@@ -869,6 +890,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.btn_seq_start.setEnabled(True)
             self.btn_seq_stop.setEnabled(False)
             self.chk_ensayo.setEnabled(True)
+            self.combo_pcb.setEnabled(True)
             self.seq_shown = r.state
 
     def _update_holes(self, r):
@@ -888,7 +910,7 @@ class ControlPanel(QtWidgets.QWidget):
         if active != self.hole_active:
             self.hole_active = active
             if active in self.hole_rows:
-                self._hole_row(self.hole_rows[active], "Atornillando" if step["kind"] == "screw" else "Ensayando", {})
+                self._hole_row(self.hole_rows[active], "Atornillando" if step["kind"] == "screw" else "Ensayando" if self.chk_ensayo.isChecked() else "En proceso", {})
                 self.hole_table.scrollToItem(self.hole_table.item(self.hole_rows[active], 0))
         if changed:
             self._paint_holes()

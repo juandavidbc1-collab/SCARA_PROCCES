@@ -17,7 +17,7 @@
 
 int main(int argc, char **argv)
 {
-    pid_ctl_t p = { .kp = 4000, .ki = 3000, .kd = 150, .kff = 80, .i_max = 250, .fric = 60, .e_zone = 0.0026f };
+    pid_ctl_t p = { .kp = 4000, .ki = 3000, .kd = 150, .kff = 80, .i_max = 250, .fric_quieto = 90, .e_empuje = 0.0042f, .ritmo = 400, .empuje_max = 450, .se_mueve = 0.15f, .fric = 60, .e_zone = 0.0026f };
     if (argc >= 6) { p.kp = atof(argv[1]); p.ki = atof(argv[2]); p.kd = atof(argv[3]); p.kff = atof(argv[4]); p.fric = atof(argv[5]); }
     float Jload_joint = (argc >= 7) ? atof(argv[6]) : 0.04f;
     const float R = 2.4f, L = 1.5e-3f, Ke = 0.01056f, B = 2.97e-6f, Tc = 3e-3f;

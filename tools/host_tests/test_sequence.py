@@ -172,7 +172,7 @@ class TestLoad(unittest.TestCase):
 
     def test_singular_point_is_rejected(self):
         with self.assertRaisesRegex(sq.SequenceError, "singular"):
-            self.load("pasos:\n  - ir: [190, 0]\n")
+            self.load("pasos:\n  - ir: [230, 0]\n")
 
     def test_unknown_step_is_rejected(self):
         with self.assertRaisesRegex(sq.SequenceError, "bailar"):
@@ -204,88 +204,98 @@ ROS2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "ros
 PROCESO = """
 repeticiones: 2
 proceso:
-  base_cm: [15, 0]
-  origen_cm: [14.5, -20]
+  base_cm: [0, 0]
   codo: -1
-  placas_cm: {A: [29.1421, -5], D: [15, -15]}
+  placas_cm: {A: [17, 10.2], D: [17, -10.2]}
   lado_mm: 38
   hueco_borde_mm: 3.5
-  servo: {arriba_s: 0.6, bajar_s: 0.6}
-  tornillo: {vueltas: 12, torque_nm: 0.4}
+  servo: {arriba_s: 1.0, bajar_s: 1.0}
+  m3: {abajo_vueltas: 24.855, trabajo_vueltas: 18.641}
 """
 
 
 class TestProcess(unittest.TestCase):
-    def _load(self, text):
+    def _load(self, text, **kw):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(text)
         self.addCleanup(os.unlink, f.name)
-        return sq.load_sequence_full(f.name)
+        return sq.load_sequence_full(f.name, **kw)
+
+    def _assigned(self, **kw):
+        return sq.load_sequence_full(os.path.join(ROS2, "secuencia.yaml"), **kw)
 
     def test_assigned_file_has_sixteen_holes_on_four_boards(self):
-        seq = sq.load_sequence_full(os.path.join(ROS2, "secuencia.yaml"))
+        seq = self._assigned()
         self.assertEqual(len(seq.process.holes), 16)
         self.assertEqual(sorted(seq.process.boards), ["A", "B", "C", "D"])
-        self.assertEqual(sum(s["kind"] == "screw" for s in seq.steps), 16)
         self.assertEqual(seq.repeat, 1)
 
-    def test_assigned_points_are_measured_from_the_base(self):
-        seq = sq.load_sequence_full(os.path.join(ROS2, "secuencia.yaml"))
-        self.assertAlmostEqual(seq.process.boards["D"][0], 0.0, places=6)
-        self.assertAlmostEqual(seq.process.boards["D"][1], -150.0, places=6)
-        self.assertAlmostEqual(seq.process.boards["A"][0], 141.421, places=3)
-        self.assertAlmostEqual(seq.process.boards["A"][1], -50.0, places=6)
+    def test_boards_are_in_a_straight_row_two_on_each_side(self):
+        b = self._assigned().process.boards
+        self.assertEqual(sorted({round(x, 6) for x, _ in b.values()}), [170.0])
+        self.assertAlmostEqual(b["A"][1], 102.0, places=6)
+        self.assertAlmostEqual(b["B"][1], 34.0, places=6)
+        self.assertAlmostEqual(b["C"][1], -34.0, places=6)
+        self.assertAlmostEqual(b["D"][1], -102.0, places=6)
 
     def test_holes_are_at_the_measured_offset_from_the_board_center(self):
-        seq = self._load(PROCESO)
-        h = {x["label"]: x for x in seq.process.holes}
-        self.assertAlmostEqual(h["A-H1"]["x"], 141.421 - 15.5, places=3)
-        self.assertAlmostEqual(h["A-H1"]["y"], -50.0 - 15.5, places=6)
-        self.assertAlmostEqual(h["A-H4"]["x"], 141.421 + 15.5, places=3)
-        self.assertAlmostEqual(h["A-H4"]["y"], -50.0 + 15.5, places=6)
+        h = {x["label"]: x for x in self._load(PROCESO).process.holes}
+        self.assertAlmostEqual(h["A-H2"]["x"], 170 - 15.5, places=3)
+        self.assertAlmostEqual(h["A-H2"]["y"], 102 + 15.5, places=3)
+        self.assertAlmostEqual(h["A-H1"]["y"], 102 - 15.5, places=3)
 
-    def test_process_order_is_move_drop_then_screw(self):
-        seq = self._load(PROCESO)
-        kinds = [s["kind"] for s in seq.steps]
-        first_hole = kinds.index("screw")
-        self.assertEqual(kinds[:2], ["cmd", "goto"], "codo y origen")
-        self.assertEqual(kinds[2:first_hole + 1], ["goto", "wait", "cmd", "wait", "cmd", "wait", "screw"])
-        self.assertEqual(seq.steps[4]["text"], "servo subir")
-        self.assertEqual(seq.steps[6]["text"], "servo bajar")
-        self.assertEqual(kinds[-1], "goto", "termina en el origen")
-        self.assertEqual((seq.steps[-1]["x"], seq.steps[-1]["y"]), (seq.steps[1]["x"], seq.steps[1]["y"]))
+    def test_hole_order_is_top_row_then_bottom_row(self):
+        names = [h["label"] for h in self._load(PROCESO).process.holes]
+        self.assertEqual(names[:4], ["A-H2", "A-H4", "A-H3", "A-H1"])
 
-    def test_unreachable_origin_is_moved_and_reported(self):
-        seq = self._load(PROCESO)
-        g = seq.steps[1]
-        self.assertAlmostEqual(math.hypot(g["x"], g["y"]), sq.ORIGEN_RADIO_MM, places=6)
-        self.assertAlmostEqual(math.atan2(g["y"], g["x"]), math.atan2(-200.0, -5.0), places=6)
-        self.assertTrue(any("origen" in n for n in seq.notes), seq.notes)
+    def test_every_hole_follows_the_robot_sequence(self):
+        seq = self._assigned()
+        i = next(k for k, s in enumerate(seq.steps) if s["kind"] == "goto")
+        un_hueco = seq.steps[i:i + 11]
+        self.assertEqual([s["kind"] for s in un_hueco], ["goto", "wait", "cmd", "wait", "m3", "wait", "cmd", "wait", "m3", "cmd", "wait"])
+        self.assertEqual(un_hueco[2]["text"], "servo subir")
+        self.assertEqual(un_hueco[4]["vueltas"], 24.855)
+        self.assertEqual(un_hueco[6]["text"], "servo bajar")
+        self.assertEqual(un_hueco[8]["vueltas"], 18.641)
+        self.assertEqual(un_hueco[8]["fin"], "hecho")
+        self.assertEqual(un_hueco[9]["text"], "servo 0")
+
+    def test_process_ends_at_zero_zero(self):
+        last = self._assigned().steps[-1]
+        self.assertEqual((last["kind"], last["a"], last["b"]), ("ang", 0.0, 0.0))
+
+    def test_all_holes_fit_the_measured_limits(self):
+        seq = self._assigned()
+        for h in seq.process.holes:
+            self.assertIsNone(sq.point_problem(h["x"], h["y"], elbow=seq.process.elbow), h["label"])
+
+    def test_choosing_a_pcb_keeps_only_its_holes(self):
+        seq = self._assigned(pcb=3)
+        self.assertEqual([h["label"] for h in seq.process.holes], ["C-H2", "C-H4", "C-H3", "C-H1"])
+        self.assertEqual(sorted(seq.process.boards), ["A", "B", "C", "D"], "se siguen dibujando todas")
+        self.assertEqual(seq.steps[-1]["kind"], "ang")
+
+    def test_pcb_out_of_range_is_rejected(self):
+        with self.assertRaises(sq.SequenceError) as e:
+            self._assigned(pcb=5)
+        self.assertIn("PCB", str(e.exception))
 
     def test_unreachable_hole_is_rejected_with_its_name(self):
         with self.assertRaises(sq.SequenceError) as e:
-            self._load(PROCESO.replace("base_cm: [15, 0]", "base_cm: [14.5, -20]").replace("origen_cm: [14.5, -20]", "origen_cm: [14.5, -5]"))
+            self._load(PROCESO.replace("A: [17, 10.2]", "A: [30, 10.2]"))
         self.assertIn("A-H", str(e.exception))
 
     def test_joint_limits_are_checked_for_the_requested_elbow(self):
         with self.assertRaises(sq.SequenceError) as e:
-            self._load(PROCESO.replace("codo: -1", "codo: 1"))
-        self.assertIn("D-H", str(e.exception))
+            self._load(PROCESO.replace("codo: -1", "codo: 1").replace("D: [17, -10.2]", "D: [10, -17]"))
         self.assertIn("codo", str(e.exception))
 
-    def test_keeps_one_elbow_in_every_hole(self):
-        seq = sq.load_sequence_full(os.path.join(ROS2, "secuencia.yaml"))
-        for h in seq.process.holes:
-            self.assertIsNone(sq.point_problem(h["x"], h["y"], elbow=seq.process.elbow), h["label"])
-
-    def test_m3_cannot_go_below_its_limit(self):
-        self.assertEqual(len(self._load(PROCESO + "  m3: {paso_mm: 0.5, bajada_max_mm: 7}\n").process.holes), 8)
+    def test_m3_cannot_go_below_its_measured_limit(self):
         with self.assertRaises(sq.SequenceError) as e:
-            self._load(PROCESO + "  m3: {paso_mm: 0.5, bajada_max_mm: 5}\n")
-        self.assertIn("tornillo", str(e.exception))
-        with self.assertRaises(sq.SequenceError) as e:
-            self._load(PROCESO + "  m3: {paso_mm: 0.5, bajada_max_mm: 7}\n  ensayo: {potencia: 100, bajar_s: 10}\n")
-        self.assertIn("ensayo", str(e.exception))
+            self._load(PROCESO.replace("abajo_vueltas: 24.855", "abajo_vueltas: 26"))
+        self.assertIn("m3", str(e.exception))
+        with self.assertRaises(sq.SequenceError):
+            self._load(PROCESO.replace("trabajo_vueltas: 18.641", "trabajo_vueltas: 25"))
 
     def test_servo_goes_from_minus_180_to_180(self):
         self.assertEqual(sq._parse_step({"servo": {"accion": -90}})["text"], "servo -90")
@@ -300,7 +310,7 @@ class TestProcess(unittest.TestCase):
 
     def _write_old(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write("repeticiones: 3\npasos:\n  - ir: [120, 80]\n  - servo: {accion: subir, tiempo: 0.5}\n  - atornillar: {vueltas: 8, torque: 0.3}\n  - codo: -1\n")
+            f.write("repeticiones: 3\npasos:\n  - ir: [120, 80]\n  - servo: {accion: subir, tiempo: 0.5}\n  - atornillar: {vueltas: 8, torque: 0.3}\n  - codo: -1\n  - m3_ir: 18.6\n")
         self.addCleanup(os.unlink, f.name)
         return f.name
 
@@ -309,112 +319,73 @@ class TestProcess(unittest.TestCase):
         self.assertEqual(steps[1], {"kind": "cmd", "text": "servo subir", "secs": 0.5, "desc": "Servo: subir"})
         self.assertEqual((steps[2]["kind"], steps[2]["vueltas"], steps[2]["torque"]), ("screw", 8.0, 0.3))
         self.assertEqual(steps[3]["text"], "elbow -1")
+        self.assertEqual((steps[4]["kind"], steps[4]["vueltas"]), ("m3", 18.6))
+
+    def test_m3_ir_out_of_range_is_rejected(self):
+        with self.assertRaises(ValueError):
+            sq._parse_step({"m3_ir": 30})
 
 
 class TestRehearsal(unittest.TestCase):
-    def _load(self, extra=""):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(PROCESO + extra)
-        self.addCleanup(os.unlink, f.name)
-        return sq.load_sequence_full(f.name, ensayo=True)
+    def _load(self, ensayo=True, pcb=None):
+        return sq.load_sequence_full(os.path.join(ROS2, "secuencia.yaml"), ensayo=ensayo, pcb=pcb)
 
     def test_visits_the_same_holes_in_the_same_order(self):
-        seq = self._load()
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(PROCESO)
-        self.addCleanup(os.unlink, f.name)
-        real = sq.load_sequence_full(f.name)
         goto = lambda st: [(s["x"], s["y"]) for s in st if s["kind"] == "goto"]
-        self.assertEqual(goto(seq.steps), goto(real.steps))
+        self.assertEqual(goto(self._load().steps), goto(self._load(ensayo=False).steps))
 
-    def test_never_touches_servo_or_screw(self):
-        seq = self._load()
-        self.assertFalse([s for s in seq.steps if s["kind"] == "screw"])
-        self.assertFalse([s for s in seq.steps if s["kind"] == "cmd" and "servo" in s["text"]])
+    def test_never_touches_the_servo(self):
+        self.assertFalse([s for s in self._load().steps if s["kind"] == "cmd" and "servo" in s["text"]])
 
-    def test_each_hole_goes_down_then_up_for_the_same_time(self):
-        seq = self._load()
-        tools = [s for s in seq.steps if s["kind"] == "tool"]
-        self.assertEqual(len(tools), 2 * len(seq.process.holes))
-        down, up = tools[0], tools[1]
-        self.assertEqual((down["label"], up["label"]), ("A-H1", "A-H1"))
-        self.assertEqual((down["pct"], up["pct"]), (40.0, -40.0))
-        self.assertEqual((down["secs"], up["secs"]), (3.5, 3.5))
+    def test_m3_goes_as_low_as_in_the_process(self):
+        seq = self._load(pcb=1)
+        m3 = [s for s in seq.steps if s["kind"] == "m3"]
+        self.assertEqual([s["vueltas"] for s in m3[:2]], [24.855, 18.641])
+        self.assertEqual(m3[1]["fin"], "ensayado")
 
-    def test_stops_at_the_bottom_before_going_up(self):
-        seq = self._load()
-        i = next(k for k, s in enumerate(seq.steps) if s["kind"] == "tool")
-        pause = seq.steps[i + 1]
-        self.assertEqual((pause["kind"], pause["label"]), ("wait", "A-H1"))
-        self.assertLess(seq.steps[i + 2]["pct"], 0)
+    def test_pcb_can_be_chosen(self):
+        self.assertEqual(len(self._load(pcb=4).process.holes), 4)
 
-    def test_stop_during_the_pause_at_the_bottom_is_reported(self):
+
+class TestM3Runner(unittest.TestCase):
+    def setUp(self):
         self.t, self.sent = 0.0, []
-        r = sq.SequenceRunner([{"kind": "wait", "secs": 1.0, "label": "A-H1", "desc": "p"}], 1, self.sent.append, lambda: self.t)
-        r.start()
-        r.stop()
-        self.assertTrue(r.tool_left_down)
+        steps = [sq._m3_ir(24.855, "b", "A-H2"), dict(sq._m3_ir(18.641, "s", "A-H2"), fin="hecho"), sq._wait(1.0, "w")]
+        self.r = sq.SequenceRunner(steps, 1, self.sent.append, lambda: self.t)
+        self.r.start()
 
-    def test_stopping_a_screw_warns_that_m3_is_down(self):
-        self.t, self.sent = 0.0, []
-        r = sq.SequenceRunner([{"kind": "screw", "vueltas": 12.0, "torque": 0.4, "label": "A-H1", "desc": "s"}], 1, self.sent.append, lambda: self.t)
-        r.start()
-        r.stop()
-        self.assertTrue(r.tool_left_down)
+    def test_sends_the_height_and_waits_for_the_robot(self):
+        self.assertEqual(self.sent, ["m3 ir 24.855"])
+        self.t = 30.0
+        self.r.tick()
+        self.assertEqual(self.r.index, 0)
+        self.r.on_event("#M3: en 24.76 vueltas, altura 6.4 mm.")
+        self.r.tick()
+        self.assertEqual(self.sent[-1], "m3 ir 18.641")
 
-    def test_waits_after_going_up_before_moving(self):
-        seq = self._load()
-        i = next(k for k, s in enumerate(seq.steps) if s["kind"] == "tool" and s["pct"] < 0)
-        self.assertEqual(seq.steps[i + 1]["kind"], "wait")
-        self.assertEqual(seq.steps[i + 2]["kind"], "goto")
+    def test_records_the_hole_when_m3_comes_back(self):
+        self.r.on_event("#M3: en 24.76 vueltas")
+        self.r.tick()
+        self.assertEqual(self.r.results, [])
+        self.r.on_event("#M3: en 18.60 vueltas")
+        self.r.tick()
+        self.assertEqual(self.r.results, [{"hueco": "A-H2", "resultado": "hecho", "ciclo": 1}])
 
-    def test_time_and_power_come_from_the_file(self):
-        seq = self._load("  ensayo: {potencia: 25, bajar_s: 3}\n")
-        down = next(s for s in seq.steps if s["kind"] == "tool")
-        self.assertEqual((down["pct"], down["secs"]), (25.0, 3.0))
+    def test_times_out_if_m3_never_arrives(self):
+        self.t = sq.M3_TIMEOUT_S + 1.0
+        self.r.tick()
+        self.assertEqual(self.r.state, "aborted")
+        self.assertEqual(self.sent[-2:], ["tool 0", "stop"])
 
-    def test_power_out_of_range_is_rejected(self):
-        with self.assertRaises(sq.SequenceError):
-            self._load("  ensayo: {potencia: 150, bajar_s: 3}\n")
+    def test_stopping_with_m3_down_warns_and_stops_it(self):
+        self.r.stop()
+        self.assertTrue(self.r.tool_left_down)
+        self.assertEqual(self.sent[-2:], ["tool 0", "stop"])
 
-    def test_normal_load_ignores_the_rehearsal_block(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(PROCESO + "  ensayo: {potencia: 25, bajar_s: 3}\n")
-        self.addCleanup(os.unlink, f.name)
-        self.assertEqual(sum(s["kind"] == "screw" for s in sq.load_sequence_full(f.name).steps), 8)
-
-    def _run(self):
-        self.t = 0.0
-        self.sent = []
-        steps = [{"kind": "tool", "pct": 40.0, "secs": 3.5, "label": "A-H1", "desc": "b"},
-                 {"kind": "tool", "pct": -40.0, "secs": 3.5, "label": "A-H1", "fin": True, "desc": "s"},
-                 {"kind": "wait", "secs": 1.0, "desc": "w"}]
-        r = sq.SequenceRunner(steps, 1, self.sent.append, lambda: self.t)
-        r.start()
-        return r
-
-    def test_runner_goes_down_up_and_records_the_hole(self):
-        r = self._run()
-        self.assertEqual(self.sent, ["tool 40"])
-        self.t = 3.5; r.tick()
-        self.assertEqual(self.sent, ["tool 40", "tool 0", "tool -40"])
-        self.assertEqual(r.results, [])
-        self.t = 7.0; r.tick()
-        self.assertEqual(self.sent[-1], "tool 0")
-        self.assertEqual(r.results, [{"hueco": "A-H1", "resultado": "ensayado", "ciclo": 1}])
-
-    def test_interrupted_while_down_is_reported(self):
-        r = self._run()
-        self.t = 1.0; r.tick()
-        r.stop()
-        self.assertTrue(r.tool_left_down)
-        self.assertEqual(self.sent[-2:], ["tool 0", "stop"], "no sube solo")
-
-    def test_finished_hole_is_not_reported_as_down(self):
-        r = self._run()
-        self.t = 3.5; r.tick(); self.t = 7.0; r.tick()
-        r.stop()
-        self.assertFalse(r.tool_left_down)
+    def test_a_blocked_m3_aborts(self):
+        self.r.on_event("#ERROR: M3 no avanza: puede estar trabado o tocando algo.")
+        self.assertEqual(self.r.state, "aborted")
+        self.assertIn("no avanza", self.r.reason)
 
 
 TORNILLO_OK = "#TORNILLO: ok vueltas=12.18 prof=6.09mm avance=101% torque=0.382Nm fuerza=587N presion=37.4MPa corriente=1.18A t=7.9s"
@@ -485,77 +456,6 @@ class TestScrewRunner(unittest.TestCase):
         self.r.on_event("#FALLA: PARO DE EMERGENCIA.")
         self.assertEqual(self.r.state, "aborted")
         self.assertEqual(len(self.sent), n)
-
-
-class TestSubirM3(unittest.TestCase):
-    PROCESO = """
-proceso:
-  base_cm: [15, 0]
-  origen_cm: [14.5, -18]
-  placas_cm: {A: [29.1421, -5]}
-  lado_mm: 38
-  hueco_borde_mm: 3.5
-  tornillo: {vueltas: 12, torque_nm: 0.4%s}
-"""
-
-    def _load(self, extra=""):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(self.PROCESO % extra)
-        self.addCleanup(os.unlink, f.name)
-        return sq.load_sequence_full(f.name)
-
-    def test_m3_goes_up_after_each_screw_before_the_arm_moves(self):
-        seq = sq.load_sequence_full(os.path.join(ROS2, "secuencia.yaml"))
-        screws = [i for i, s in enumerate(seq.steps) if s["kind"] == "screw"]
-        self.assertEqual(len(screws), 16)
-        for i in screws:
-            pause, up, settle, after = seq.steps[i + 1:i + 5]
-            self.assertEqual(pause["kind"], "wait")
-            self.assertEqual((up["kind"], up["pct"], up["secs"], up["label"]), ("tool", -35.0, 18.5, seq.steps[i]["label"]))
-            self.assertEqual(settle["kind"], "wait")
-            self.assertEqual(after["kind"], "goto")
-
-    def test_without_values_it_climbs_the_same_turns_at_the_tightening_pwm(self):
-        up = [s for s in self._load().steps if s["kind"] == "tool"][0]
-        self.assertEqual(up["pct"], -35.0)
-        self.assertAlmostEqual(up["secs"], 18.55, places=2)     # 12 vueltas / 0,647 vueltas por segundo
-
-    def test_file_values_are_used(self):
-        up = [s for s in self._load(", subir_pct: 50, subir_s: 7").steps if s["kind"] == "tool"][0]
-        self.assertEqual((up["pct"], up["secs"]), (-50.0, 7.0))
-
-    def test_rejects_a_climb_that_would_not_move(self):
-        for extra in (", subir_pct: 0", ", subir_pct: 101", ", subir_s: 0"):
-            with self.assertRaises(sq.SequenceError, msg=extra):
-                self._load(extra)
-
-    def test_rehearsal_does_not_add_a_second_climb(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(self.PROCESO % "")
-        self.addCleanup(os.unlink, f.name)
-        tools = [s for s in sq.load_sequence_full(f.name, ensayo=True).steps if s["kind"] == "tool"]
-        self.assertEqual(len(tools), 8, "4 huecos: baja y sube una vez en cada uno")
-
-    def test_stop_while_climbing_turns_m3_off_and_warns(self):
-        sent, t = [], [0.0]
-        r = sq.SequenceRunner(sq._raise_m3("A-H1", 35.0, 18.5, 0.3), 1, sent.append, lambda: t[0])
-        r.start()
-        t[0] = 0.3; r.tick()
-        self.assertEqual(sent, ["tool -35"])
-        r.stop()
-        self.assertEqual(sent, ["tool -35", "tool 0", "stop"])
-        self.assertTrue(r.tool_left_down)
-
-    def test_a_long_climb_keeps_renewing_the_order(self):
-        sent, t = [], [0.0]
-        r = sq.SequenceRunner(sq._raise_m3("A-H1", 35.0, 18.5, 0.3), 1, sent.append, lambda: t[0])
-        r.start()
-        while r.running and t[0] < 30.0:
-            t[0] += 0.5
-            r.tick()
-        self.assertEqual(r.state, "done")
-        self.assertGreaterEqual(sent.count("tool -35"), 4, "TOOL_MAX_ON_MS del firmware es 10 s")
-        self.assertEqual(sent[-1], "tool 0")
 
 
 class TestServoBaja(unittest.TestCase):

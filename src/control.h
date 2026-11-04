@@ -15,7 +15,7 @@
  *  - Paro de emergencia: no pasa por la cola de órdenes. Freno, motores libres, STBY = 0, enclavado en
  *    FAULT (F_ESTOP) hasta "clear". Conserva el Home salvo que interrumpa un Home en curso.
  *  - Motor desactivado: driver libre, encoder contando, sin supervisión. Home solo con los activos.
- *  - Atornillado (M3): el brazo se queda quieto. Paro, falla, detener, apagar o desactivar M3 lo cancelan. Paro y falla bajan el destornillador (servo a 0).
+ *  - Atornillado (M3): el brazo se queda quieto. Paro, falla, detener, apagar o desactivar M3 lo cancelan. Paro y falla bajan el destornillador (servo a SERVO_ABAJO_DEG).
  */
 #pragma once
 #include <stdbool.h>
@@ -56,6 +56,10 @@ typedef struct {
     float      tool_prof;     /* [mm] */
     float      servo_deg;
     uint8_t    screw_fase;    /* screw_phase_t */
+    bool       m3_ref;        /* M3 ya encontró el tope de arriba */
+    bool       m3_homing;
+    bool       m3_moviendo;   /* buscando el tope o yendo a una altura */
+    float      m3_vueltas;    /* desde el tope de arriba, crece al bajar; 0 si no hay referencia */
 } ctl_status_t;
 
 void ctl_init(void);          /* crea colas; no mueve nada */
@@ -79,6 +83,8 @@ bool ctl_cmd_motor(int m, bool on);   /* m: 0 = J1, 1 = J2, 2 = M3 */
 bool ctl_motor_enabled(int m);
 bool ctl_cmd_tool(float pct);         /* M3 en lazo abierto: -100..100 %. Hay que renovarla antes de TOOL_MAX_ON_MS */
 bool ctl_cmd_servo(float deg);        /* SERVO_GRADOS_MIN a SERVO_GRADOS_MAX */
+bool ctl_cmd_m3_ir(float vueltas);    /* a esas vueltas desde el tope de arriba. Al llegar emite "#M3: ..." */
+bool ctl_cmd_m3_home(void);           /* sube M3 hasta el tope y pone ahí el cero */
 bool ctl_cmd_screw(float vueltas, float torque);   /* 0 = valor por defecto. Al terminar emite "#TORNILLO: ..." */
 bool ctl_cmd_ctrl(ctrl_t c);          /* solo con el robot en OFF o HOLD */
 bool ctl_cmd_rstform(rst_form_t f);   /* solo con el robot en OFF o HOLD; ambos ejes */

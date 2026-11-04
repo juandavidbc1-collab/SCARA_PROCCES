@@ -296,12 +296,20 @@ class PanelCase(unittest.TestCase):
         self.assertIn("ABORTADA", self.p.lbl_seq.text())
 
     def test_rehearsal_option_reloads_without_servo_or_screw(self):
+        servos = lambda: [s for s in self.p.steps if s["kind"] == "cmd" and "servo" in s["text"]]
         self.p.chk_ensayo.click()
-        self.assertFalse([s for s in self.p.steps if s["kind"] == "screw"])
+        self.assertFalse(servos())
         self.assertEqual(self.p.hole_table.rowCount(), 16)
         self.assertEqual(self.p.hole_table.item(0, 1).text(), "Pendiente")
         self.p.chk_ensayo.click()
-        self.assertEqual(sum(s["kind"] == "screw" for s in self.p.steps), 16)
+        self.assertEqual(len(servos()), 48)
+
+    def test_choosing_a_pcb_loads_only_its_holes(self):
+        self.p.combo_pcb.setCurrentIndex(2)
+        self.assertEqual(self.p.hole_table.rowCount(), 4)
+        self.assertEqual(self.p.hole_table.item(0, 0).text(), "B-H2")
+        self.p.combo_pcb.setCurrentIndex(0)
+        self.assertEqual(self.p.hole_table.rowCount(), 16)
 
     def test_rehearsal_keeps_the_chosen_repetitions(self):
         self.p.spin_repeat.setValue(7)

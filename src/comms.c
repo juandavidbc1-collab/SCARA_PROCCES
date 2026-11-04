@@ -13,6 +13,7 @@
 #include "hal.h"
 #include "kinematics.h"
 #include "motion.h"
+#include "proceso.h"
 #include "uros_cmd.h"
 
 #define RAD2DEG (180.0f / (float)M_PI)
@@ -55,12 +56,16 @@ static void print_menu(void)
            "  2  Sensores en vivo (topes y encoders)    [cualquier tecla = salir]\n"
            "  3  Telemetria en vivo (q, x, y)           [cualquier tecla = salir]\n"
            "  4  Pulso de prueba de sentido del motor\n"
-           "  5  HOME (tope, tope contrario y vuelve)    [cualquier tecla = detener]\n"
+           "  5  HOME (busca los topes y va a 0 0)       [cualquier tecla = detener]\n"
            "  6  Ir a una posicion x y z (mm)           [cualquier tecla = detener]\n"
            "  7  Ir a angulos q1 q2 (grados)            [cualquier tecla = detener]\n"
            "  8  DETENER (mantiene la posicion)\n"
            "  9  APAGAR motores\n"
            "  0  Borrar falla\n"
+           "  m3 home | m3 subir | m3 bajar | m3 estado     M3: referencia, moverlo, ver su altura [cualquier tecla = detener]\n"
+           "  proceso [n] | proceso pcb 1 a 4 [n]           todas las PCB o solo una, n veces (0 = sin fin) [cualquier tecla = detener]\n"
+           "  proceso ensayo [pcb p] [n] | proceso lista [pcb p]   sin mover el servo | ver los pasos sin mover nada\n"
+           "  servo subir | servo bajar                     mover el destornillador a mano\n"
            "  m  este menu      help  lista de comandos escritos      cfg  configuracion\n"
            "  Esc o cualquier tecla en un monitor/movimiento = parar. Lo que escribes se ve en pantalla.\n"
            "====================================================\n");
@@ -69,14 +74,22 @@ static void print_menu(void)
 static void print_help(void)
 {
     printf("\nCOMANDOS ESCRITOS (terminan con Enter):\n"
-           "  home                    ir a un tope, al contrario, y volver a donde estaba\n"
+           "  home                    buscar los topes e ir a 0 0 (brazo recto)\n"
            "  goto x y z              ir a (x,y,z) en mm        ej: goto 120 80 0\n"
            "  ang q1 q2               ir a angulos en grados    ej: ang 20 90\n"
            "  stop | off | clear      detener y mantener | apagar motores | borrar falla\n"
            "  elbow +1 | elbow -1     elegir codo preferido\n"
            "  estop                   paro de emergencia (se rearma con clear)\n"
            "  motor 1|2|3 on|off      activar o desactivar un motor (3 = atornillador)\n"
-           "  tool pct                motor 3: -100 a 100 %%\n"
+           "  tool pct                motor 3: -100 a 100 %% (positivo baja)\n"
+           "  m3 home                 M3 sube hasta el tope y pone ahi el cero\n"
+           "  m3 subir | m3 trabajo | m3 bajar | m3 ir v   M3 arriba | a 31 mm | a 6 mm | a v vueltas desde arriba\n"
+           "  m3 estado               vueltas y altura de M3\n"
+           "  servo subir|bajar|g     destornillador: arriba, abajo o grados (-180 a 180)\n"
+           "  proceso [n]             las 4 PCB, n veces (0 = sin fin); cualquier tecla lo detiene\n"
+           "  proceso pcb p [n]       solo la PCB p: 1 = A, 2 = B, 3 = C, 4 = D\n"
+           "  proceso ensayo [pcb p] [n]   los mismos huecos sin mover el servo; M3 baja hasta 6 mm\n"
+           "  proceso lista [pcb p]   imprime los pasos sin mover nada\n"
            "  ctrl pid|rst            controlador activo;  rstform pos|inc|mask  forma del RST\n"
            "  rst                     ver el RST;  rst j kp ki kd s1 b c kff  para cambiarlo\n"
            "  gain                    ver ganancias;  gain j kp ki kd kff fric  para cambiarlas (j = 1 o 2)\n"
@@ -97,7 +110,7 @@ static void print_cfg(void)
     for (int j = 0; j < NJ; j++) {
         float lo, hi; ctl_get_limits(j, &lo, &hi);
         printf("  %s: limites vigentes %.1f a %.1f deg | q en el 1er tope %.1f deg | Home empieza por el tope %s | cuentas/rad %.1f | enc_sign %+d motor_sign %+d\n",
-               JC[j].name, lo * RAD2DEG, hi * RAD2DEG, JC[j].q_home * RAD2DEG,
+               JC[j].name, lo * RAD2DEG, hi * RAD2DEG, JC[j].home_dir * (float)JC[j].cuentas_a_cero / JC[j].k * RAD2DEG,
                JC[j].home_dir < 0 ? "MIN" : "MAX", JC[j].k, JC[j].enc_sign, JC[j].motor_sign);
     }
 }
@@ -156,6 +169,27 @@ static void cmd_ang(float a, float b)
     printf(r == MOTION_OK ? "%s (cualquier tecla = detener)\n" : "%s\n", m);
 }
 
+static void cmd_proceso(const char *a)
+{
+    int rep = 1, pcb = 0, k;
+    bool ensayo = false, lista = false;
+    char t[16];
+    while (sscanf(a, " %15s%n", t, &k) == 1) {
+        a += k;
+        if (!strcmp(t, "ensayo")) ensayo = true;
+        else if (!strcmp(t, "lista")) lista = true;
+        else if (!strcmp(t, "pcb")) {
+            if (sscanf(a, " %d%n", &pcb, &k) != 1 || pcb < 1 || pcb > 4) { printf("#ERROR: la PCB va de 1 a 4.\n"); return; }
+            a += k;
+        } else if (sscanf(t, "%d", &rep) != 1) {
+            printf("#ERROR: usa proceso [ensayo] [pcb 1-4] [n] | proceso lista [pcb 1-4]\n");
+            return;
+        }
+    }
+    if (lista) proceso_listar(ensayo, pcb);
+    else proceso_iniciar(ensayo, pcb, rep);
+}
+
 /* ------------------------------------------------------------------ intérprete de comandos escritos */
 static void procesar(char *l)
 {
@@ -202,6 +236,8 @@ static void procesar(char *l)
         return;
     }
     if (!strncmp(l, "cfg", 3)) { print_cfg(); return; }
+    if (!strcmp(l, "proceso")) { cmd_proceso(""); return; }
+    if (!strncmp(l, "proceso ", 8)) { cmd_proceso(l + 8); return; }
     if (!strncmp(l, "menu", 4) || !strcmp(l, "m")) { print_menu(); return; }
     if (!strncmp(l, "help", 4) || *l == '?') { print_help(); return; }
     /* estop, motor, tool, ctrl, rstform, rst: mismo intérprete que ROS 2 */
@@ -216,7 +252,7 @@ static void procesar(char *l)
 static bool motion_active(void)
 {
     ctl_status_t s; ctl_get_status(&s);
-    return s.mode == M_HOMING || s.mode == M_MOVE || s.mode == M_PULSE;
+    return s.mode == M_HOMING || s.mode == M_MOVE || s.mode == M_PULSE || s.m3_moviendo;
 }
 
 static void menu_action(char c)
@@ -296,6 +332,13 @@ static void on_byte(uint8_t c)
     if (c == '\n' && prev_cr) { prev_cr = false; return; }       /* Enter = CR+LF: ignorar el LF */
     prev_cr = (c == '\r');
 
+    if (proceso_activo()) {                                       /* cualquier tecla detiene el proceso */
+        proceso_detener();
+        n = 0; linea[0] = 0;
+        show_prompt();
+        return;
+    }
+
     /* flechas y otras secuencias ESC [ ... se descartan */
     if (esc_state == 1) { if (c == '[' || c == 'O') { esc_state = 2; return; } esc_state = 0; }
     else if (esc_state == 2) { if (c >= 0x40 && c <= 0x7E) esc_state = 0; return; }
@@ -344,7 +387,7 @@ static void comms_task(void *arg)
     esp_task_wdt_add(NULL);
     TickType_t t_csv = xTaskGetTickCount(), t_live = xTaskGetTickCount();
 
-    printf("\n\n*** SCARA v5 - firmware punto a punto ***\n");
+    printf("\n\n*** SCARA sin ROS. Orden: m3 home, 5 (Home del brazo), proceso ***\n");
     print_cfg();
     line_sens();
     print_menu();
@@ -356,7 +399,8 @@ static void comms_task(void *arg)
         for (int i = 0; i < r; i++) on_byte(buf[i]);
 
         char ev[160];
-        while (ctl_event_pop(ev, sizeof ev, 0)) imprimir_evento(ev);
+        while (ctl_event_pop(ev, sizeof ev, 0)) { proceso_evento(ev); imprimir_evento(ev); }
+        proceso_tick();
 
         TickType_t t = xTaskGetTickCount();
         if (g_csv) {
