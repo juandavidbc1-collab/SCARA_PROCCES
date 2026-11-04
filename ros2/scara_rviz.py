@@ -28,7 +28,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 import scara_sequence as sq
 
-L1_MM, L2_MM = 120.0, 70.0          # mantener igual que KIN en src/config.c
+L1_MM, L2_MM = 125.0, 105.0          # mantener igual que KIN en src/config.c
 FRAME = "base_link"
 BEST_EFFORT = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=5)
 RELIABLE = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=10)

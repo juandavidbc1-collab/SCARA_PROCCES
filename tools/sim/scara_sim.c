@@ -18,9 +18,9 @@ void sim_init(void)
     g_stby = false; g_now = 0; g_power = true; g_tool_duty = 0;
     g_screw_mode = SIM_TORNILLO_NORMAL; g_m3_enc_ok = true; g_servo_deg = -1.0f; g_m3_w = g_m3_th = 0.0; g_m3_th_tornillo = NAN; g_m3_barrido = false;
     g_lock[0] = g_lock[1] = false;
-    /* finales de carrera donde el firmware espera q_home, para que q coincida con la posición física tras el Home */
-    sw_min_deg[0] = JC[0].q_home * 180.0 / M_PI; sw_max_deg[0] = 120.0;
-    sw_min_deg[1] = JC[1].q_home * 180.0 / M_PI; sw_max_deg[1] = 143.0;
+    /* finales de carrera donde dicen las cuentas del firmware, para que q coincida con la posición física tras el Home */
+    sw_min_deg[0] = -JC[0].cuentas_a_cero / JC[0].k * 180.0 / M_PI; sw_max_deg[0] = 78.9;
+    sw_min_deg[1] = -JC[1].cuentas_a_cero / JC[1].k * 180.0 / M_PI; sw_max_deg[1] = 112.0;
     ctl_init();
 }
 

@@ -31,6 +31,24 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
     while (k && (unsigned char)l[k - 1] <= ' ') l[--k] = 0;              /* espacios finales / \n */
 
     float f[6]; int j;
+    if (!strncmp(l, "m3 ", 3)) {
+        const char *a = l + 3;
+        bool ok;
+        if (!strcmp(a, "home")) ok = ctl_cmd_m3_home();
+        else if (!strcmp(a, "subir")) ok = ctl_cmd_m3_ir(M3_VUELTAS_ARRIBA);
+        else if (!strcmp(a, "bajar")) ok = ctl_cmd_m3_ir(M3_VUELTAS_ATORNILLAR);
+        else if (!strcmp(a, "trabajo")) ok = ctl_cmd_m3_ir(M3_VUELTAS_TRABAJO);
+        else if (sscanf(a, "ir %f", &f[0]) == 1) ok = ctl_cmd_m3_ir(f[0]);
+        else if (!strcmp(a, "estado")) {
+            ctl_status_t s; ctl_get_status(&s);
+            if (s.m3_ref) snprintf(reply, n, "#INFO: M3 a %.3f vueltas desde arriba, altura %.1f mm (limites %.0f a %.0f mm)", s.m3_vueltas,
+                                   M3_ALTURA_ARRIBA_MM - s.m3_vueltas * M3_PASO_MM, M3_ALTURA_ABAJO_MM, M3_ALTURA_ARRIBA_MM);
+            else snprintf(reply, n, "#INFO: M3 sin referencia: usa m3 home");
+            return true;
+        } else { snprintf(reply, n, "#ERROR: usa m3 home | subir | trabajo | bajar | ir v | estado"); return false; }
+        if (ok) { snprintf(reply, n, "#OK: M3: %s", a); return true; }
+        snprintf(reply, n, "#ERROR: M3 rechazado (de 0 a %.2f vueltas)", M3_VUELTAS_ATORNILLAR); return false;
+    }
     if (!strcmp(l, "home")) {
         if (ctl_cmd_home()) { snprintf(reply, n, "#OK: home solicitado"); return true; }
         snprintf(reply, n, "#ERROR: home rechazado (falla activa o movimiento en curso)"); return false;
@@ -90,7 +108,7 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
         return true;
     }
     if (!strcmp(l, "help")) {
-        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | servo g/subir/bajar | screw [v t] | ctrl pid/rst | rstform pos/inc/mask/orig | rst | gain");
+        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | m3 home/subir/trabajo/bajar/ir/estado | servo g/subir/bajar | ctrl pid/rst | rstform pos/inc/mask/orig | rst | gain");
         return true;
     }
     if (sscanf(l, "goto %f %f %f", &f[0], &f[1], &f[2]) == 3) return motion_goto_xyz(f[0], f[1], f[2], reply, n) == MOTION_OK;

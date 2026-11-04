@@ -18,7 +18,7 @@
 
 #define DT (1.0f / CONTROL_HZ)
 
-typedef enum { C_HOME, C_MOVE, C_STOP, C_OFF, C_CLEAR, C_PULSE, C_GAIN, C_MOTOR, C_TOOL, C_SERVO, C_SCREW, C_CTRL, C_RSTFORM, C_RST } cmd_type_t;
+typedef enum { C_HOME, C_MOVE, C_STOP, C_OFF, C_CLEAR, C_PULSE, C_GAIN, C_MOTOR, C_TOOL, C_SERVO, C_SCREW, C_M3_HOME, C_M3_IR, C_CTRL, C_RSTFORM, C_RST } cmd_type_t;
 typedef struct {
     cmd_type_t t;
     float q[NJ];
@@ -68,6 +68,15 @@ static struct {
     int32_t tool_counts;
     float tool_w;                    /* velocidad de M3, eje de salida [rad/s], positiva al apretar */
     bool tool_init;
+    bool linea;                      /* el movimiento actual es una recta de la punta */
+    int l_codo;
+    float l_x0, l_y0, l_ux, l_uy;
+    bool m3_ref, m3_homing, m3_ir;
+    float m3_destino, m3_v_av;
+    int64_t m3_t_av;
+    int32_t m3_cero, m3_h_ini, m3_h_ref;
+    int64_t m3_t_ini, m3_t_ref;
+    float m3_v;                      /* vueltas desde el tope de arriba */
     screw_t screw;
     screw_est_t tool_est;            /* con el tornillo terminado, se queda el resultado para mostrarlo */
     float servo_deg;
@@ -81,7 +90,6 @@ static struct {
     int64_t t_reach_us, t_inband_us;
     /* homing */
     int h_step; int h_stage; home_phase_t h_phase; int64_t h_t_phase_us, h_t_start_us;
-    int32_t c_start[NJ];             /* cuentas al iniciar el Home: a ahi se vuelve al terminar */
     float qlim_min[NJ], qlim_max[NJ]; /* limites por software vigentes (se miden en el Home) */
     float edge0[NJ];                 /* q del borde de liberacion del primer tope */
     int32_t h_c_prev; int64_t h_t_prev_us;
@@ -152,6 +160,8 @@ static void screw_informar(void)
 static void tool_detener(void)
 {
     S.tool_cmd = 0.0f;
+    S.m3_homing = false;
+    S.m3_ir = false;
     if (screw_activo(&S.screw)) { screw_cancel(&S.screw); screw_informar(); }
 }
 
@@ -160,6 +170,58 @@ static void tool_apagar(void)
     tool_detener();
     S.tool_duty = 0.0f;
     hal_tool_free();
+}
+
+/* Con M3 abajo, mover el brazo arrastraría la punta. Sin referencia no se sabe: se deja mover para poder hacer Home. */
+static bool m3_abajo(void) { return S.m3_ref && S.m3_v > M3_VUELTAS_TRASLADO; }
+
+/* Cada tick: lleva la cuenta de la altura, busca el tope de arriba y no deja salir del recorrido medido. */
+static void m3_recorrido(int32_t c3)
+{
+    S.m3_v = S.m3_ref ? (float)(c3 - S.m3_cero) / TOOL_ENC_CUENTAS : 0.0f;
+    if (S.m3_homing) {
+        const int64_t t = now_us();
+        S.tool_t_us = t;
+        if (labs((long)(c3 - S.m3_h_ref)) >= M3_HOME_MIN_CUENTAS) {
+            S.m3_h_ref = c3;
+            S.m3_t_ref = t;
+        } else if (t - S.m3_t_ref > M3_HOME_QUIETO_MS * 1000LL) {
+            S.tool_cmd = 0.0f;
+            S.m3_homing = false;
+            S.m3_cero = c3;
+            S.m3_ref = true;
+            emit("#M3: referencia hecha en el tope de arriba (subio %.2f vueltas).", (float)(S.m3_h_ini - c3) / TOOL_ENC_CUENTAS);
+        }
+        if (S.m3_homing && t - S.m3_t_ini > M3_HOME_LIMITE_S * 1000000LL) {
+            S.tool_cmd = 0.0f;
+            S.m3_homing = false;
+            emit("#ERROR: M3 no encontro el tope de arriba en %d s.", M3_HOME_LIMITE_S);
+        }
+    } else if (S.m3_ir) {
+        const float err = S.m3_destino - S.m3_v;
+        const int64_t t = now_us();
+        S.tool_t_us = t;
+        if (fabsf(err) <= M3_INERCIA) {
+            S.tool_cmd = 0.0f;
+            S.m3_ir = false;
+            emit("#M3: en %.2f vueltas, altura %.1f mm.", S.m3_v, M3_ALTURA_ARRIBA_MM - S.m3_v * M3_PASO_MM);
+        } else if (fabsf(S.m3_v - S.m3_v_av) >= 0.01f) {
+            S.m3_v_av = S.m3_v;
+            S.m3_t_av = t;
+        } else if (t - S.m3_t_av > M3_QUIETO_MS * 1000LL) {
+            S.tool_cmd = 0.0f;
+            S.m3_ir = false;
+            emit("#ERROR: M3 no avanza: puede estar trabado o tocando algo.");
+        }
+        if (S.m3_ir) {
+            const float d = fabsf(err) > M3_VUELTAS_LENTO ? SCREW_DUTY_RAPIDO : SCREW_DUTY_LENTO;
+            S.tool_cmd = err > 0.0f ? d : -d;
+        }
+    } else if (S.m3_ref && !screw_activo(&S.screw) &&
+               ((S.tool_cmd > 0.0f && S.m3_v >= M3_VUELTAS_ATORNILLAR - M3_INERCIA) || (S.tool_cmd < 0.0f && S.m3_v <= M3_INERCIA))) {
+        S.tool_cmd = 0.0f;
+        emit("#INFO: M3 llego al limite de su recorrido.");
+    }
 }
 
 static void servo_mover(float deg)
@@ -289,6 +351,7 @@ static void leer_sensores(void)
     S.tool_counts = c3;
     S.tool_init = true;
     S.tool_w += DT / (TOOL_VEL_TAU_S + DT) * (dv * 2.0f * (float)M_PI / DT - S.tool_w);
+    m3_recorrido(c3);
     /* El atornillado también se decide aquí: se calcula con el PWM de verdad aplicado en el ciclo anterior. */
     if (screw_activo(&S.screw)) {
         S.tool_cmd = screw_step(&S.screw, &M3_MODEL, DT, S.tool_duty, S.tool_w, dv);
@@ -315,16 +378,54 @@ static void pid_todos(void)
     for (int j = 0; j < NJ; j++) control_eje(j);
 }
 
+/* ---------------------------------------------------------------- línea recta de la punta */
+static bool recta_q(float x, float y, int codo, float q[NJ])
+{
+    int usado = 0;
+    return kin_ik(&KIN, x, y, codo, S.qlim_min, S.qlim_max, q, &usado) == IK_OK && usado == codo;
+}
+
+/* Si toda la recta se puede recorrer con el mismo codo, planea sobre ella. Si no (por ejemplo, desde el brazo recto), false: va por articulaciones. */
+static bool planear_recta(const cmd_t *c)
+{
+    S.linea = false;
+    if (!S.en[0] || !S.en[1] || isnan(c->tgt[0])) return false;
+    float x0, y0, q[NJ];
+    kin_fk(&KIN, S.qref[0], S.qref[1], &x0, &y0);
+    const float dx = c->tgt[0] - x0, dy = c->tgt[1] - y0, largo = hypotf(dx, dy);
+    const int codo = c->q[1] < 0.0f ? -1 : 1;
+    if (largo < 0.5f || !recta_q(x0, y0, codo, q)) return false;
+    if (fabsf(q[0] - S.qref[0]) > 0.02f || fabsf(q[1] - S.qref[1]) > 0.02f) return false;
+    for (int i = 1; i <= 24; i++) if (!recta_q(x0 + dx * i / 24.0f, y0 + dy * i / 24.0f, codo, q)) return false;
+    const float q0[NJ] = { 0.0f, 0.0f }, q1[NJ] = { largo, 0.0f };
+    const float v[NJ] = { LINEA_VEL, LINEA_VEL }, a[NJ] = { LINEA_ACC, LINEA_ACC };
+    S.l_codo = codo; S.l_x0 = x0; S.l_y0 = y0; S.l_ux = dx / largo; S.l_uy = dy / largo;
+    S.linea = traj_plan(&S.traj, q0, q1, v, a);
+    return S.linea;
+}
+
+/* Consigna de cada eje en el punto s de la recta [mm], con velocidad sd [mm/s]: cinemática inversa y jacobiano inverso. */
+static void recta_consigna(float s, float sd)
+{
+    float q[NJ];
+    if (!recta_q(S.l_x0 + S.l_ux * s, S.l_y0 + S.l_uy * s, S.l_codo, q)) { S.qdref[0] = S.qdref[1] = 0.0f; return; }
+    const float xd = S.l_ux * sd, yd = S.l_uy * sd;
+    const float s2 = sinf(q[1]), c1 = cosf(q[0]), s1 = sinf(q[0]), c12 = cosf(q[0] + q[1]), s12 = sinf(q[0] + q[1]);
+    S.qref[0] = q[0]; S.qref[1] = q[1];
+    S.qdref[0] = (c12 * xd + s12 * yd) / (KIN.l1 * s2);
+    S.qdref[1] = -((KIN.l1 * c1 + KIN.l2 * c12) * xd + (KIN.l1 * s1 + KIN.l2 * s12) * yd) / (KIN.l1 * KIN.l2 * s2);
+}
+
 /* ---------------------------------------------------------------- órdenes */
 static void do_cmd(const cmd_t *c)
 {
     switch (c->t) {
     case C_HOME:
         if (screw_activo(&S.screw)) { emit("#ERROR: M3 esta atornillando: espera o detenlo."); break; }
+        if (m3_abajo()) { emit("#ERROR: sube M3 antes de mover el brazo (m3 subir)."); break; }
         if (S.mode != M_OFF && S.mode != M_HOLD) { emit("#ERROR: no se puede iniciar Home, el robot esta en modo %s (usa 8 para detener).", ctl_mode_str(S.mode)); break; }
         if (!algun_eje_activo()) { emit("#ERROR: no hay ejes activos para hacer Home."); break; }
         for (int j = 0; j < NJ; j++) { if (S.en[j]) S.homed[j] = false; S.u[j] = 0; }
-        for (int j = 0; j < NJ; j++) S.c_start[j] = S.counts[j];
         S.h_step = 0; S.h_stage = 0; S.h_phase = H_SEEK;
         while (!S.en[HOME_ORDER[S.h_step]]) S.h_step++;
         S.h_t_phase_us = S.h_t_start_us = now_us();
@@ -332,11 +433,12 @@ static void do_cmd(const cmd_t *c)
         for (int j = 0; j < NJ; j++) S.duty[j] = 0;
         S.mode = M_HOMING;
         hal_stby(true);
-        emit("#HOME: iniciando. Eje %d: primero un tope, luego el otro, y vuelve a donde estaba. (cualquier tecla = detener)", HOME_ORDER[S.h_step] + 1);
+        emit("#HOME: iniciando. Eje %d: busca sus topes y luego va a 0 0. (cualquier tecla = detener)", HOME_ORDER[S.h_step] + 1);
         break;
 
     case C_MOVE:
         if (screw_activo(&S.screw)) { emit("#ERROR: M3 esta atornillando: el brazo no se mueve hasta que termine."); break; }
+        if (m3_abajo()) { emit("#ERROR: sube M3 antes de mover el brazo (m3 subir)."); break; }
         if (!all_homed()) { emit("#ERROR: primero ejecuta HOME (opcion 5)."); break; }
         if (S.mode != M_OFF && S.mode != M_HOLD) { emit("#ERROR: el robot esta ocupado (modo %s). Detenlo primero (opcion 8).", ctl_mode_str(S.mode)); break; }
         if (S.mode == M_OFF) start_pid_from_here();
@@ -348,7 +450,7 @@ static void do_cmd(const cmd_t *c)
                 q0[j] = S.en[j] ? S.qref[j] : S.q[j];
                 q1[j] = S.en[j] ? c->q[j] : S.q[j];           /* un eje desactivado no participa */
             }
-            bool mueve = traj_plan(&S.traj, q0, q1, vmax, amax);
+            bool mueve = planear_recta(c) || traj_plan(&S.traj, q0, q1, vmax, amax);
             memcpy(S.tgt, c->tgt, sizeof S.tgt);
             S.t_traj_us = now_us();
             S.mode = M_MOVE;
@@ -449,7 +551,10 @@ static void do_cmd(const cmd_t *c)
     }
 
     case C_TOOL:
+        if (c->g[0] == 0.0f) { tool_detener(); break; }
         if (S.mode == M_FAULT) { emit("#ERROR: M3 no arranca con una falla o paro activo."); break; }
+        if (!S.m3_ref) { emit("#ERROR: primero busca la referencia de M3: m3 home"); break; }
+        if (S.m3_homing || S.m3_ir) { emit("#ERROR: M3 se esta moviendo: espera o detenlo."); break; }
         if (!S.tool_en) { emit("#ERROR: M3 esta desactivado (usa motor 3 on)."); break; }
         if (screw_activo(&S.screw)) { emit("#ERROR: M3 esta atornillando: espera o detenlo."); break; }
         S.tool_cmd = c->g[0] * (float)TOOL_DUTY_MAX / 100.0f;
@@ -467,20 +572,48 @@ static void do_cmd(const cmd_t *c)
     case C_SCREW:
         if (S.mode == M_FAULT) { emit("#ERROR: no se atornilla con una falla o paro activo."); break; }
         if (S.servo_deg != SERVO_ABAJO_DEG) { emit("#ERROR: baja el destornillador antes de atornillar."); break; }
+        if (!S.m3_ref) { emit("#ERROR: primero busca la referencia de M3: m3 home"); break; }
+        if (S.m3_homing || S.m3_ir) { emit("#ERROR: M3 se esta moviendo: espera o detenlo."); break; }
         if (!S.tool_en) { emit("#ERROR: M3 esta desactivado (usa motor 3 on)."); break; }
         if (screw_activo(&S.screw)) { emit("#ERROR: M3 ya esta atornillando."); break; }
         if (S.mode != M_OFF && S.mode != M_HOLD) { emit("#ERROR: el brazo debe estar quieto para atornillar (modo %s).", ctl_mode_str(S.mode)); break; }
         {
+            /* La altura medida manda: pase lo que pase con el torque, M3 no baja de ahí. */
+            const float libre = M3_VUELTAS_ATORNILLAR - M3_INERCIA - S.m3_v;
+            if (libre <= 0.0f) { emit("#ERROR: M3 ya esta abajo: subelo antes de atornillar."); break; }
             screw_cfg_t cfg = SCREW_CFG;
-            if (c->g[0] > 0.0f) {
-                cfg.vueltas_meta = c->g[0];
-                cfg.vueltas_min = 0.75f * c->g[0];
-                cfg.vueltas_max = c->g[0] + 2.0f;
-            }
+            cfg.vueltas_meta = (c->g[0] > 0.0f && c->g[0] < libre) ? c->g[0] : libre;
+            cfg.vueltas_min = 0.75f * cfg.vueltas_meta;
+            cfg.vueltas_max = (c->g[0] > 0.0f && c->g[0] + 2.0f < libre) ? c->g[0] + 2.0f : libre;
             if (c->g[1] > 0.0f) cfg.torque_meta = c->g[1];
             screw_start(&S.screw, &M3_MODEL, &cfg);
             S.tool_cmd = S.screw.duty;
         }
+        break;
+
+    case C_M3_IR:
+        if (S.mode == M_FAULT) { emit("#ERROR: M3 no arranca con una falla o paro activo."); break; }
+        if (!S.m3_ref) { emit("#ERROR: primero busca la referencia de M3: m3 home"); break; }
+        if (S.m3_homing) { emit("#ERROR: M3 se esta moviendo: espera o detenlo."); break; }
+        if (screw_activo(&S.screw)) { emit("#ERROR: M3 esta atornillando: espera o detenlo."); break; }
+        S.tool_en = true;
+        S.m3_destino = c->g[0];
+        S.m3_v_av = S.m3_v;
+        S.m3_t_av = now_us();
+        S.m3_ir = true;
+        break;
+
+    case C_M3_HOME:
+        if (S.mode == M_FAULT) { emit("#ERROR: M3 no arranca con una falla o paro activo."); break; }
+        if (screw_activo(&S.screw)) { emit("#ERROR: M3 esta atornillando: espera o detenlo."); break; }
+        S.tool_en = true;
+        S.m3_ir = false;
+        S.m3_homing = true;
+        S.m3_h_ini = S.m3_h_ref = S.tool_counts;
+        S.m3_t_ini = S.m3_t_ref = now_us();
+        S.tool_t_us = S.m3_t_ini;
+        S.tool_cmd = -M3_HOME_DUTY;
+        emit("#INFO: M3 sube hasta el tope. Para detenerlo: 8 o el paro.");
         break;
 
     case C_CTRL:
@@ -514,9 +647,9 @@ static void h_fase(home_phase_t f, int j)
 
 /*
  * HOME en tres tiempos, eje por eje (orden HOME_ORDER):
- *   etapa 0: va al tope de home_dir, frena, retrocede hasta liberarlo -> ahi q = q_home (referencia).
+ *   etapa 0: va al tope de home_dir, frena, retrocede hasta liberarlo -> de ahi se cuentan cuentas_a_cero hasta q = 0.
  *   etapa 1: va al tope contrario, frena, retrocede hasta liberarlo -> mide el recorrido real.
- * Al terminar los dos ejes, ambos vuelven a la posicion en que estaban al pulsar Home.
+ * Al terminar los dos ejes, van a q_fin (0, 0: brazo recto). Asi el Home siempre queda en el mismo sitio.
  */
 static void modo_homing(void)
 {
@@ -540,7 +673,7 @@ static void modo_homing(void)
 
     switch (S.h_phase) {
     case H_SEEK:
-        S.u[j] = dir_seek * (float)HOME_DUTY;
+        S.u[j] = dir_seek * (float)JC[j].home_duty;
         if (S.fc[j][side]) { h_fase(H_BRAKE, j); S.u[j] = 0; }
         break;
     case H_BRAKE:
@@ -548,23 +681,23 @@ static void modo_homing(void)
         if (t - S.h_t_phase_us > 250000) h_fase(H_BACKOFF, j);
         break;
     case H_BACKOFF:
-        S.u[j] = -dir_seek * (float)HOME_DUTY_SLOW;
+        S.u[j] = -dir_seek * (float)JC[j].home_duty_slow;
         if (!S.fc[j][side]) {
             /* borde de liberacion del tope */
             if (S.h_stage == 0) {
-                S.off[j] = S.counts[j] - (int32_t)lroundf(JC[j].enc_sign * JC[j].q_home * JC[j].k);
-                S.q[j] = JC[j].q_home;
-                S.edge0[j] = JC[j].q_home;
+                /* El encoder solo cuenta desde donde arranca: el tope da el punto de partida y q = 0 está a un número fijo de cuentas de él. */
+                S.off[j] = S.counts[j] - JC[j].enc_sign * JC[j].home_dir * JC[j].cuentas_a_cero;
+                S.q[j] = JC[j].home_dir * (float)JC[j].cuentas_a_cero / JC[j].k;
+                S.edge0[j] = S.q[j];
                 S.homed[j] = true;
-                emit("#HOME: eje %d referenciado en el tope %s (q = %.2f deg). Ahora el tope contrario...",
-                     j + 1, side ? "MAX" : "MIN", JC[j].q_home * 180.0f / (float)M_PI);
+                emit("#HOME: eje %d referenciado en el tope %s: q = 0 a %ld cuentas (q aqui = %.2f deg).", j + 1, side ? "MAX" : "MIN", (long)JC[j].cuentas_a_cero, S.q[j] * 180.0f / (float)M_PI);
             } else {
-                float e1 = S.q[j], e0 = S.edge0[j];
-                float lo = fminf(e0, e1) + HOME_MARGEN_RAD, hi = fmaxf(e0, e1) - HOME_MARGEN_RAD;
+                const float e1 = S.q[j], e0 = S.edge0[j];
+                const float lo = fminf(e0, e1) + HOME_MARGEN_RAD, hi = fmaxf(e0, e1) - HOME_MARGEN_RAD;
                 if (hi > lo) { portENTER_CRITICAL(&lock); S.qlim_min[j] = lo; S.qlim_max[j] = hi; portEXIT_CRITICAL(&lock); }
-                emit("#HOME: eje %d recorrido medido: de %.2f a %.2f deg (total %.2f deg). Limites por software: %.2f a %.2f deg.",
-                     j + 1, fminf(e0, e1) * 180.0f / (float)M_PI, fmaxf(e0, e1) * 180.0f / (float)M_PI,
-                     fabsf(e1 - e0) * 180.0f / (float)M_PI, S.qlim_min[j] * 180.0f / (float)M_PI, S.qlim_max[j] * 180.0f / (float)M_PI);
+                emit("#HOME: eje %d recorrido medido: %ld cuentas = %.2f deg, de %.2f a %.2f deg. Limites por software: %.2f a %.2f deg.",
+                     j + 1, labs(lroundf(fabsf(e1 - e0) * JC[j].k)), fabsf(e1 - e0) * 180.0f / (float)M_PI, fminf(e0, e1) * 180.0f / (float)M_PI, fmaxf(e0, e1) * 180.0f / (float)M_PI,
+                     S.qlim_min[j] * 180.0f / (float)M_PI, S.qlim_max[j] * 180.0f / (float)M_PI);
             }
             S.qref[j] = S.q[j]; S.qdref[j] = 0; ctrl_reset(j);
             h_fase(H_SETTLE, j); S.u[j] = 0;
@@ -584,21 +717,22 @@ static void modo_homing(void)
                     /* terminaron los dos ejes: volver a donde estaban */
                     float vmax[NJ], amax[NJ], q0[NJ], q1[NJ];
                     for (int i = 0; i < NJ; i++) {
-                        q1[i] = JC[i].enc_sign * (float)(S.c_start[i] - S.off[i]) / JC[i].k;
+                        q1[i] = JC[i].q_fin;
                         if (q1[i] < S.qlim_min[i]) q1[i] = S.qlim_min[i];
                         if (q1[i] > S.qlim_max[i]) q1[i] = S.qlim_max[i];
                         if (!S.en[i]) q1[i] = S.q[i];
-                        vmax[i] = JC[i].vmax * 0.5f; amax[i] = JC[i].amax * 0.5f;
+                        vmax[i] = HOME_CENTRO_VEL; amax[i] = HOME_CENTRO_ACC;
                         q0[i] = S.q[i]; S.qref[i] = S.q[i]; ctrl_reset(i);
                         S.stall_c[i] = S.counts[i]; S.stall_t_us[i] = t; S.follow_ms[i] = 0;
                     }
+                    S.linea = false;
                     traj_plan(&S.traj, q0, q1, vmax, amax);
                     S.t_traj_us = t;
                     S.tgt[0] = S.tgt[1] = S.tgt[2] = NAN;
                     S.await_reach = true; S.t_inband_us = 0;
                     S.t_reach_us = t + (int64_t)(S.traj.T * 1e6f) + REACH_TIMEOUT_MS * 1000LL;
                     S.mode = M_MOVE;
-                    emit("#HOME: terminado. Volviendo a la posicion inicial (q1 = %.2f, q2 = %.2f deg)...",
+                    emit("#HOME: terminado. Yendo a 0 0, brazo recto (q1 = %.2f, q2 = %.2f deg)...",
                          q1[0] * 180.0f / (float)M_PI, q1[1] * 180.0f / (float)M_PI);
                 } else {
                     int jn = HOME_ORDER[S.h_step];
@@ -651,10 +785,18 @@ static void modo_jog(bool fresh_dm, const int8_t dir[NJ])
 static void modo_move(void)
 {
     float t = (float)(now_us() - S.t_traj_us) * 1e-6f;
-    traj_eval(&S.traj, t, S.qref, S.qdref);
+    if (S.linea) {
+        float s[NJ], sd[NJ];
+        traj_eval(&S.traj, t, s, sd);
+        recta_consigna(s[0], sd[0]);
+    } else {
+        traj_eval(&S.traj, t, S.qref, S.qdref);
+    }
     pid_todos();
     if (t >= S.traj.T) {
-        for (int j = 0; j < NJ; j++) S.qdref[j] = 0;
+        /* Lo acumulado para vencer la fricción en movimiento haría pasarse del punto, y tarda segundos en descargarse. */
+        for (int j = 0; j < NJ; j++) { S.qdref[j] = 0; S.pid[j].i = 0.0f; }
+        S.linea = false;
         S.mode = M_HOLD;
     }
 }
@@ -680,7 +822,15 @@ static void modo_hold(void)
         }
     } else {
         S.t_inband_us = 0;
-        if (t > S.t_reach_us) { S.await_reach = false; emit("#ERROR: no llego a la consigna a tiempo (revisa las ganancias con gain)."); }
+        if (t > S.t_reach_us) {
+            const float e1 = S.qref[0] - S.q[0], e2 = S.qref[1] - S.q[1];
+            S.await_reach = false;
+            /* Muy cerca sigue siendo llegar: se avisa de cuánto faltó, pero no se corta un proceso por una décima de grado. */
+            if (fabsf(e1) <= HOLD_TOL_AVISO_RAD && fabsf(e2) <= HOLD_TOL_AVISO_RAD)
+                emit("#LLEGO: con aviso, falta J1 %.2f, J2 %.2f deg.", e1 * 180.0f / (float)M_PI, e2 * 180.0f / (float)M_PI);
+            else
+                emit("#ERROR: no llego a la consigna a tiempo: falta J1 %.2f, J2 %.2f deg, PWM J1 %.0f, J2 %.0f.", e1 * 180.0f / (float)M_PI, e2 * 180.0f / (float)M_PI, S.duty[0], S.duty[1]);
+        }
     }
 }
 
@@ -718,15 +868,19 @@ static void supervisar(void)
             if (++S.follow_ms[j] * 1000 / CONTROL_HZ > FOLLOW_ERR_MS) { set_fault(F_FOLLOW); return; }
         } else S.follow_ms[j] = 0;
 
-        /* bloqueo: PWM alto y el encoder no cuenta */
-        if (fabsf(S.duty[j]) < STALL_DUTY) { S.stall_c[j] = S.counts[j]; S.stall_t_us[j] = t; }
+        /* bloqueo: PWM alto, el encoder no cuenta y el eje aún no llegó a su consigna */
+        if (fabsf(S.duty[j]) < STALL_DUTY || fabsf(S.qref[j] - S.q[j]) <= HOLD_TOL_RAD) { S.stall_c[j] = S.counts[j]; S.stall_t_us[j] = t; }
         else if (t - S.stall_t_us[j] > STALL_WINDOW_MS * 1000LL) {
             if (abs(S.counts[j] - S.stall_c[j]) < STALL_MIN_COUNTS) { set_fault(F_STALL); return; }
             S.stall_c[j] = S.counts[j]; S.stall_t_us[j] = t;
         }
 
         /* en MOVE, tocar un final de carrera significa que se perdió la referencia */
-        if (S.mode == M_MOVE && (S.fc[j][0] || S.fc[j][1])) { set_fault(F_LIMIT); return; }
+        if (S.mode == M_MOVE && (S.fc[j][0] || S.fc[j][1])) {
+            emit("#INFO: final de carrera activo: J%d %s.", j + 1, S.fc[j][0] ? "min" : "max");
+            set_fault(F_LIMIT);
+            return;
+        }
     }
 }
 
@@ -768,8 +922,9 @@ static void aplicar_salidas(void)
         if (S.fc[j][1] && u > 0) u = 0;
         /* rampa de PWM */
         float d = u - S.duty[j];
-        if (d >  DUTY_SLEW_PER_MS) d =  DUTY_SLEW_PER_MS;
-        if (d < -DUTY_SLEW_PER_MS) d = -DUTY_SLEW_PER_MS;
+        const float paso = fabsf(u) < fabsf(S.duty[j]) ? DUTY_BAJA_PER_MS : DUTY_SLEW_PER_MS;   /* soltar el PWM es casi inmediato */
+        if (d >  paso) d =  paso;
+        if (d < -paso) d = -paso;
         S.duty[j] += d;
         hal_motor_drive(j, (int)lroundf(S.duty[j]));
     }
@@ -787,6 +942,8 @@ static void publicar(void)
     pub.tool_fuerza = S.tool_est.fuerza; pub.tool_presion = S.tool_est.presion;
     pub.tool_vueltas = S.screw.vueltas; pub.tool_prof = screw_profundidad_mm(&M3_MODEL, S.screw.vueltas);
     pub.servo_deg = S.servo_deg; pub.screw_fase = (uint8_t)S.screw.fase;
+    pub.m3_ref = S.m3_ref; pub.m3_homing = S.m3_homing; pub.m3_vueltas = S.m3_v;
+    pub.m3_moviendo = S.m3_homing || S.m3_ir;
     for (int j = 0; j < NJ; j++) {
         rst_get_pid(&S.rst[j], pub_rst[j]);
         pub.homed[j] = S.homed[j]; pub.q[j] = S.q[j]; pub.qref[j] = S.qref[j];
@@ -825,7 +982,7 @@ static void tick(void)
     if (!fresh_dm) S.jog_lock = false;
     bool quiere_jog = false;
     for (int j = 0; j < NJ; j++) if (fresh_dm && !S.jog_lock && S.en[j] && dir[j] != 0) quiere_jog = true;
-    if (screw_activo(&S.screw)) quiere_jog = false;   /* la punta está dentro del tornillo */
+    if (screw_activo(&S.screw) || m3_abajo()) quiere_jog = false;   /* la punta está dentro del tornillo */
 
     if ((S.mode == M_OFF || S.mode == M_HOLD) && quiere_jog) {
         if (S.mode == M_OFF) start_pid_from_here();
@@ -879,7 +1036,7 @@ void ctl_init(void)
     S.ctrl = CTRL_DEFAULT;
     S.form = RST_FORM_DEFAULT;
     S.tool_en = TOOL_ACTIVO_INIT;
-    servo_mover(SERVO_ABAJO_DEG);
+    servo_mover(SERVO_INICIO_DEG);
     {
         const bool en0[NJ] = MOTORES_INIT;
         for (int j = 0; j < NJ; j++) S.en[j] = en0[j];
@@ -888,7 +1045,8 @@ void ctl_init(void)
         rst_cargar(j, S.form);
         rst_reset(&S.rst[j], 0.0f);
         S.pid[j] = (pid_ctl_t){ .kp = JC[j].kp, .ki = JC[j].ki, .kd = JC[j].kd, .kff = JC[j].kff,
-                                .i_max = 250.0f, .fric = JC[j].fric, .e_zone = 0.0026f };
+                                .i_max = 250.0f, .fric = JC[j].fric, .fric_quieto = PID_FRIC_QUIETO, .e_zone = 0.0026f,
+                                .e_empuje = PID_E_EMPUJE, .ritmo = PID_EMPUJE_RITMO, .empuje_max = PID_EMPUJE_MAX, .se_mueve = PID_SE_MUEVE };
         S.off[j] = hal_enc_raw(j);                      /* q = 0 en el arranque (sin referencia) */
         S.qlim_min[j] = JC[j].q_min; S.qlim_max[j] = JC[j].q_max;   /* hasta que el Home los mida */
     }
@@ -978,6 +1136,19 @@ bool ctl_cmd_servo(float deg)
 {
     if (!(deg >= SERVO_GRADOS_MIN && deg <= SERVO_GRADOS_MAX)) return false;
     cmd_t c = { .t = C_SERVO, .g = { deg } };
+    return enviar(&c);
+}
+
+bool ctl_cmd_m3_ir(float vueltas)
+{
+    if (!(vueltas >= 0.0f && vueltas <= M3_VUELTAS_ATORNILLAR)) return false;
+    cmd_t c = { .t = C_M3_IR, .g = { vueltas } };
+    return enviar(&c);
+}
+
+bool ctl_cmd_m3_home(void)
+{
+    cmd_t c = { .t = C_M3_HOME };
     return enviar(&c);
 }
 

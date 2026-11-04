@@ -7,11 +7,12 @@ const char *const RST_FORM_NAME[] = { "RST posicional", "RST incremental", "RST 
 #define DEG(x) ((x) * (float)M_PI / 180.0f)
 #define K_RAD(extra) (ENC_CUENTAS_SALIDA * (extra) / (2.0f * (float)M_PI))
 
-/* Longitudes de los eslabones (centro de eje a centro de eje): L1 = 120 mm, L2 = 70 mm
- * -> alcance de 50 a 190 mm. */
-const kin_cfg_t KIN = { .l1 = 120.0f, .l2 = 70.0f, .sing_margin = DEG(5.0f) };
+/* Longitudes de los eslabones (centro de eje a centro de eje): L1 = 125 mm, L2 = 105 mm (medidos: L2 llega hasta la punta de la herramienta)
+ * -> alcance de 20 a 230 mm. */
+const kin_cfg_t KIN = { .l1 = 125.0f, .l2 = 105.0f, .sing_margin = DEG(5.0f) };
 
 /*
+ * paso_mm es lo que baja el prismático por vuelta (medido); la profundidad que se muestra es ese recorrido.
  * Motor 3: Pololu 37D 50:1 a 12 V, referido al eje de salida. Hoja de datos: 200 rpm y 0,2 A en vacío; 5,5 A y 21 kg·cm
  * calado (valores extrapolados por el fabricante). Sin medir en este robot.
  *   R = 12 / 5,5;  Ke = (12 - R I0) / w0;  Kt = T_calado / (I_calado - I0)   (Kt < Ke: pérdidas del reductor)
@@ -20,7 +21,7 @@ const kin_cfg_t KIN = { .l1 = 120.0f, .l2 = 70.0f, .sing_margin = DEG(5.0f) };
  */
 const screw_model_t M3_MODEL = {
     .r = 2.1818f, .ke = 0.5522f, .kt = 0.3886f, .i0 = 0.20f, .vbus = 12.0f, .pwm_max = PWM_MAX,
-    .paso_mm = 0.5f, .k_tuerca = 0.2f, .d_mm = 3.0f, .area_mm2 = 15.7f, .torque_rosca = 0.03f,
+    .paso_mm = M3_PASO_MM, .k_tuerca = 0.2f, .d_mm = 3.0f, .area_mm2 = 15.7f, .torque_rosca = 0.03f,
 };
 
 const screw_cfg_t SCREW_CFG = {
@@ -35,30 +36,35 @@ const screw_cfg_t SCREW_CFG = {
  * Ganancias iniciales: salen de una simulación con el modelo del motor Pololu 37D
  * (tools/host_tests/sim_pid.c). Hay que afinarlas en el robot real con el comando "gain".
  *
- * Límites, q_home y signos son PROVISIONALES: [CAMBIAR] tras medir el robot.
- *   - q_home: ángulo del eslabón justo cuando se libera el final de carrera de Home.
+ * Límites y signos son PROVISIONALES: [CAMBIAR] tras medir el robot.
+ *   - cuentas_a_cero: medidas en el Home del 2026-11-03 que dejó el brazo donde se quería (102,98 y 129,53 grados). Corrígelas con
+ *     el ángulo que marque el brazo recto: cuentas = grados * ENC_CUENTAS_SALIDA / 360.
  *   - q_min/q_max: déjalos ~3° dentro de los finales de carrera.
  */
 const joint_cfg_t JC[NJ] = {
     {
         .name = "J1 (eslabon 1)",
+        .q_fin = 0.0f,                    /* al terminar el Home, los dos ejes van a 0: el brazo recto */
         .pwm = PIN_M1_PWM, .in1 = PIN_M1_IN1, .in2 = PIN_M1_IN2,
-        /* topes cruzados: el final de carrera izquierdo (extremo + de q) esta en el conector FC1_MIN */
-        .enc_a = PIN_ENC1_A, .enc_b = PIN_ENC1_B, .fc_min = PIN_FC1_MAX, .fc_max = PIN_FC1_MIN,
+        /* Medido en el Home del robot: yendo hacia q negativo, J1 toca el final de carrera conectado en J9 (FC1_MIN). */
+        .enc_a = PIN_ENC1_A, .enc_b = PIN_ENC1_B, .fc_min = PIN_FC1_MIN, .fc_max = PIN_FC1_MAX,
         .enc_sign = -1, .motor_sign = -1,
         .k = K_RAD(RELACION_EXTRA_J1),
-        .q_min = DEG(-120.0f), .q_max = DEG(120.0f), .q_home = DEG(-108.0f), .home_dir = -1,
-        .vmax = DEG(60.0f), .amax = DEG(120.0f), .jog_v = DEG(30.0f),
-        .kp = 5000.0f, .ki = 3000.0f, .kd = 180.0f, .kff = 80.0f, .fric = 70.0f,
+        .q_min = DEG(-120.0f), .q_max = DEG(120.0f), .cuentas_a_cero = 1838, .home_dir = -1, .home_duty = HOME_DUTY_J1, .home_duty_slow = HOME_DUTY_SLOW_J1,
+        .vmax = DEG(25.0f), .amax = DEG(30.0f), .jog_v = DEG(30.0f),
+        .kp = 6000.0f, .ki = 6000.0f, .kd = 180.0f, .kff = 80.0f, .fric = 150.0f,
     },
     {
         .name = "J2 (eslabon 2)",
+        .q_fin = 0.0f,
         .pwm = PIN_M2_PWM, .in1 = PIN_M2_IN1, .in2 = PIN_M2_IN2,
-        .enc_a = PIN_ENC2_A, .enc_b = PIN_ENC2_B, .fc_min = PIN_FC2_MAX, .fc_max = PIN_FC2_MIN,
+        /* Medido en el Home del robot: el final de carrera de la derecha (q negativo) está en J11; el de la izquierda va en J12. */
+        .enc_a = PIN_ENC2_A, .enc_b = PIN_ENC2_B, .fc_min = PIN_FC2_MIN, .fc_max = PIN_FC2_MAX,
         .enc_sign = +1, .motor_sign = -1,
         .k = K_RAD(RELACION_EXTRA_J2),
-        .q_min = DEG(-140.0f), .q_max = DEG(140.0f), .q_home = DEG(-143.0f), .home_dir = -1,
-        .vmax = DEG(60.0f), .amax = DEG(120.0f), .jog_v = DEG(30.0f),
-        .kp = 5000.0f, .ki = 3000.0f, .kd = 180.0f, .kff = 80.0f, .fric = 70.0f,
+        .q_min = DEG(-140.0f), .q_max = DEG(140.0f), .cuentas_a_cero = 2376, .home_dir = -1, .home_duty = HOME_DUTY, .home_duty_slow = HOME_DUTY_SLOW,
+       
+        .vmax = DEG(25.0f), .amax = DEG(30.0f), .jog_v = DEG(30.0f),
+        .kp = 6000.0f, .ki = 6000.0f, .kd = 180.0f, .kff = 80.0f, .fric = 110.0f,
     },
 };

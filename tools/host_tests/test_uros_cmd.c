@@ -30,6 +30,9 @@ bool ctl_cmd_screw(float v, float t) { if (v < 0) return false; n_screw++; last_
 void ctl_get_status(ctl_status_t *s) { memset(s, 0, sizeof *s); s->mode = M_HOLD; s->homed[0] = s->homed[1] = true; }
 void ctl_get_gain(int j, float o[5]) { (void)j; for (int i = 0; i < 5; i++) o[i] = (float)(i + 1); }
 bool ctl_cmd_home(void) { n_home++; return true; }
+static int n_m3_home; static float last_m3_ir = -1.0f;
+bool ctl_cmd_m3_home(void) { n_m3_home++; return true; }
+bool ctl_cmd_m3_ir(float v) { if (v < 0 || v > M3_VUELTAS_ATORNILLAR) return false; last_m3_ir = v; return true; }
 void ctl_cmd_stop(void) { n_stop++; }
 void ctl_cmd_off(void) { n_off++; }
 void ctl_cmd_clear(void) { n_clear++; }
@@ -113,6 +116,10 @@ int main(void)
     ok = uros_cmd_exec("servo bajar", r, sizeof r);  CHECK(ok && last_servo == SERVO_ABAJO_DEG, "servo bajar");
     ok = uros_cmd_exec("servo 200", r, sizeof r);     CHECK(!ok && n_servo == 3 && strstr(r, "#ERROR"), "servo fuera de rango");
     ok = uros_cmd_exec("servo -90", r, sizeof r);     CHECK(ok && last_servo == -90.0f, "servo con angulo negativo");
+    ok = uros_cmd_exec("m3 home", r, sizeof r);       CHECK(ok && n_m3_home == 1, "m3 home");
+    ok = uros_cmd_exec("m3 bajar", r, sizeof r);      CHECK(ok && last_m3_ir == M3_VUELTAS_ATORNILLAR, "m3 bajar");
+    ok = uros_cmd_exec("m3 trabajo", r, sizeof r);    CHECK(ok && last_m3_ir == M3_VUELTAS_TRABAJO, "m3 trabajo");
+    ok = uros_cmd_exec("m3 ir 30", r, sizeof r);      CHECK(!ok && strstr(r, "#ERROR"), "m3 fuera de recorrido");
     ok = uros_cmd_exec("screw", r, sizeof r);         CHECK(ok && n_screw == 1 && last_screw[0] == 0.0f, "screw usa los valores por defecto");
     ok = uros_cmd_exec("screw 8 0.3", r, sizeof r);   CHECK(ok && last_screw[0] == 8.0f && fabsf(last_screw[1] - 0.3f) < 1e-6f, "screw vueltas torque");
     ok = uros_cmd_exec("screw -1 0.3", r, sizeof r);  CHECK(!ok && n_screw == 2 && strstr(r, "#ERROR"), "screw fuera de rango");

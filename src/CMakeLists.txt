@@ -36,7 +36,7 @@ if(SCARA_UROS_MODE)
     set(extra_requires micro_ros_espidf_component)
 else()
     # protocolo de texto por serial
-    list(APPEND srcs comms.c)
+    list(APPEND srcs comms.c proceso.c)
     set(extra_requires "")
 endif()
 

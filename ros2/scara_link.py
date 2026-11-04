@@ -68,6 +68,8 @@ class RobotState:
     tool_prof: float = 0.0     # [mm]
     servo: float = 0.0         # [grados]
     screw_fase: str = SCREW_PHASES[0]
+    m3_ref: bool = False       # ya halló su tope de arriba
+    m3_vueltas: float = 0.0    # desde ese tope
 
 
 def decode_state(d):
@@ -86,6 +88,8 @@ def decode_state(d):
         p = int(d[23])
         extra = dict(tool_i=d[16], tool_torque=d[17], tool_fuerza=d[18], tool_presion=d[19], tool_vueltas=d[20], tool_prof=d[21],
                      servo=d[22], screw_fase=SCREW_PHASES[p] if 0 <= p < len(SCREW_PHASES) else "?")
+    if len(d) >= 26:
+        extra.update(m3_ref=bool(d[24]), m3_vueltas=d[25])
     return RobotState(q1=d[0], q2=d[1], x=d[2], y=d[3], mode=mode, estop=estop, faulted=faulted,
                       fault_text=FAULTS[f] if 0 <= f < len(FAULTS) else "desconocida",
                       home1=bool(d[6]), home2=bool(d[7]),

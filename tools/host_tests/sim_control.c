@@ -56,10 +56,10 @@ int main(void)
     CHECK(S.homed[0] && S.homed[1], "ambos ejes referenciados");
     CHECK(S.mode == M_HOLD, "termina en HOLD (modo %s)", ctl_mode_str(S.mode));
     printf("  posicion fisica inicial = (%.2f, %.2f) deg; tras el Home = (%.2f, %.2f) deg\n", phys_off_deg[0], phys_off_deg[1], phys_deg(0), phys_deg(1));
-    CHECK(fabs(phys_deg(0) - phys_off_deg[0]) < 0.7 && fabs(phys_deg(1) - phys_off_deg[1]) < 0.7, "volvio a la posicion inicial");
+    CHECK(fabs(S.q[0]) < 0.02f && fabs(S.q[1]) < 0.02f, "termina en 0 0");
     for (int j = 0; j < NJ; j++) {
         float lo, hi; ctl_get_limits(j, &lo, &hi);
-        double qh = JC[j].q_home * 180.0 / M_PI;                       /* q en el flanco de liberacion del 1er tope */
+        double qh = JC[j].home_dir * JC[j].cuentas_a_cero / JC[j].k * 180.0 / M_PI;   /* q en el flanco de liberacion del 1er tope */
         double lo_f = qh + 3, hi_f = qh + (sw_max_deg[j] - sw_min_deg[j]) - 3;   /* limites 3 deg dentro de cada tope */
         printf("  eje %d: limites medidos %.2f a %.2f deg (esperado ~%.1f a ~%.1f)\n", j + 1, lo * 180 / M_PI, hi * 180 / M_PI, lo_f, hi_f);
         CHECK(fabs(lo * 180 / M_PI - lo_f) < 2.5 && fabs(hi * 180 / M_PI - hi_f) < 2.5, "recorrido medido correcto");
@@ -300,8 +300,12 @@ int main(void)
     printf("\n== ESCENARIO 10: servo y atornillado ==\n");
     #define ESPERA_TORNILLO(max_s) do { for (int t = 0; t < (int)((max_s) * 1000) && screw_activo(&S.screw); t++) correr(0.001, "m3", false); correr(0.3, "m3", false); } while (0)
     reset_sim(); correr(0.1, "boot", false);
-    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "el servo arranca en 0: destornillador abajo");
-    ctl_cmd_screw(0, 0); correr(0.05, "m3", false);
+    S.m3_ref = true;                      /* como tras "m3 home" */
+    CHECK(g_servo_deg == SERVO_INICIO_DEG, "el servo arranca en 0 grados");
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.05, "m3", false);
+    CHECK(!screw_activo(&S.screw), "sin bajar el destornillador no atornilla");
+    ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.01, "s", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.05, "m3", false);
     CHECK(!screw_activo(&S.screw) && g_tool_max == 0, "M3 desactivado: no atornilla");
     ctl_cmd_motor(2, true); correr(0.01, "m3", false);
     ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "s", false);
@@ -310,14 +314,14 @@ int main(void)
     CHECK(!ctl_cmd_servo(200.0f) && !ctl_cmd_servo(-200.0f), "angulo de servo fuera de rango se rechaza");
 
     g_m3_th_tornillo = NAN;               /* el tornillo de la prueba de arriba ya no está */
-    ctl_cmd_screw(0, 0); correr(0.01, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.01, "m3", false);
     CHECK(screw_activo(&S.screw), "atornilla con M3 activo, aun con el brazo apagado");
     ESPERA_TORNILLO(25);
     CHECK(S.screw.res == SCREW_R_SIN_APRIETE, "sin soltar tornillo con el servo: %s", screw_result_str(S.screw.res));
     CHECK(g_tool_duty == 0, "M3 queda apagado");
 
     ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
-    ctl_cmd_screw(0, 0); correr(0.15, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.15, "m3", false);
     {
         ctl_status_t st; ctl_get_status(&st);
         CHECK(st.tool_i > 0.6f && st.tool_fuerza == 0.0f && st.tool_presion == 0.0f && st.tool_torque == 0.0f,
@@ -332,7 +336,7 @@ int main(void)
         CHECK(fabs(st.tool_i - g_m3_i_real) < 0.05, "la corriente del modelo coincide con la de la planta (%.3f y %.3f A)", st.tool_i, g_m3_i_real);
         CHECK(st.tool_vueltas > 0.5f, "cuenta vueltas (%.2f)", st.tool_vueltas);
     }
-    ctl_cmd_tool(50); ctl_cmd_home(); ctl_cmd_screw(0, 0); correr(0.02, "m3", false);
+    ctl_cmd_tool(50); ctl_cmd_home(); ctl_cmd_screw(12.0f, 0.4f); correr(0.02, "m3", false);
     CHECK(S.tool_cmd == S.screw.duty && S.mode != M_HOMING, "mientras atornilla rechaza tool, home y otro tornillo");
     ESPERA_TORNILLO(25);
     CHECK(S.screw.res == SCREW_R_OK, "tornillo bien: %s, %.2f vueltas, %.3f N m", screw_result_str(S.screw.res), S.screw.vueltas, S.screw.torque_final);
@@ -347,38 +351,38 @@ int main(void)
     }
 
     g_screw_mode = SIM_TORNILLO_ATASCO; ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
-    ctl_cmd_screw(0, 0); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
     CHECK(S.screw.res == SCREW_R_TRABADO, "atasco a pocas vueltas: %s", screw_result_str(S.screw.res));
     g_screw_mode = SIM_TORNILLO_BARRIDO; ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
-    ctl_cmd_screw(0, 0); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
     CHECK(S.screw.res == SCREW_R_SIN_APRIETE, "rosca barrida: %s", screw_result_str(S.screw.res));
     g_screw_mode = SIM_TORNILLO_NORMAL; g_m3_enc_ok = false; ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false); ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
-    ctl_cmd_screw(0, 0); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.01, "m3", false); ESPERA_TORNILLO(25);
     CHECK(S.screw.res != SCREW_R_OK && S.screw.res != SCREW_R_NONE, "encoder de M3 sin senal: nunca dice ok (%s)", screw_result_str(S.screw.res));
     g_m3_enc_ok = true;
 
     /* paro y otras interrupciones a mitad del tornillo */
     ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.1, "s", false);
-    ctl_cmd_screw(0, 0); correr(0.01, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.01, "m3", false);
     CHECK(!screw_activo(&S.screw), "con el destornillador arriba no atornilla");
     ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.1, "s", false);
-    ctl_cmd_screw(0, 0); correr(1.0, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(1.0, "m3", false);
     ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "m3", false);
     CHECK(g_servo_deg == SERVO_ABAJO_DEG && screw_activo(&S.screw), "mientras atornilla, el destornillador no sube");
     ctl_cmd_estop(); correr(0.002, "paro", false);
     CHECK(g_tool_duty == 0 && S.screw.res == SCREW_R_CANCELADO, "paro: M3 parado y tornillo cancelado");
     ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.02, "paro", false);
     CHECK(g_servo_deg == SERVO_ABAJO_DEG, "durante el paro el destornillador no sube");
-    ctl_cmd_screw(0, 0); correr(0.05, "paro", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(0.05, "paro", false);
     CHECK(!screw_activo(&S.screw), "durante el paro no atornilla");
     ctl_cmd_clear(); correr(0.01, "c", false);
-    ctl_cmd_screw(0, 0); correr(1.0, "m3", false); ctl_cmd_stop(); correr(0.01, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(1.0, "m3", false); ctl_cmd_stop(); correr(0.01, "m3", false);
     CHECK(S.screw.res == SCREW_R_CANCELADO && S.tool_cmd == 0, "detener cancela el tornillo");
     correr(0.4, "m3", false); CHECK(g_tool_duty == 0, "y M3 se apaga");
-    ctl_cmd_screw(0, 0); correr(1.0, "m3", false); ctl_cmd_motor(2, false); correr(0.01, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f); correr(1.0, "m3", false); ctl_cmd_motor(2, false); correr(0.01, "m3", false);
     CHECK(S.screw.res == SCREW_R_CANCELADO && g_tool_duty == 0, "desactivar M3 cancela el tornillo");
-    ctl_cmd_motor(2, true); ctl_cmd_screw(0, 0); correr(0.5, "m3", false);
-    ctl_cmd_screw(0, 0);
+    ctl_cmd_motor(2, true); ctl_cmd_screw(12.0f, 0.4f); correr(0.5, "m3", false);
+    ctl_cmd_screw(12.0f, 0.4f);
     { float qm[2] = { 0.1f, 0.2f }; ctl_cmd_move(qm, (float[]){NAN, NAN, NAN}); }
     correr(0.05, "m3", false);
     CHECK(S.mode != M_MOVE, "no mueve el brazo mientras atornilla");

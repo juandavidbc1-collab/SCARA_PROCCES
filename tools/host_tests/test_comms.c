@@ -41,6 +41,15 @@ bool ctl_cmd_rst(int j, const float g[7]) { (void)j; (void)g; return true; }
 void ctl_get_rst(int j, float o[7]) { (void)j; for (int i = 0; i < 7; i++) o[i] = 0; }
 ctrl_t ctl_get_ctrl(void) { return CTRL_RST; }
 bool ctl_cmd_servo(float d) { (void)d; return true; }
+bool ctl_cmd_m3_home(void) { return true; }
+bool ctl_cmd_m3_ir(float v) { (void)v; return true; }
+#include "proceso.h"
+bool proceso_iniciar(bool e, int p, int r) { (void)e; (void)p; (void)r; return false; }
+void proceso_detener(void) {}
+bool proceso_activo(void) { return false; }
+void proceso_listar(bool e, int p) { (void)e; (void)p; }
+void proceso_tick(void) {}
+void proceso_evento(const char *ev) { (void)ev; }
 bool ctl_cmd_screw(float v, float t) { (void)v; (void)t; return true; }
 void ctl_get_limits(int j, float *lo, float *hi) { *lo = JC[j].q_min; *hi = JC[j].q_max; }
 
