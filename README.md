@@ -21,9 +21,9 @@ El simulador compila y corre el mismo C del firmware (`src/control.c`, `rst.c`, 
 | Simular la respuesta de posición de los tres | Hecho: `python3 tools/rst/simulate.py` |
 | Implementar en el robot el que mejor funcione | Hecho en firmware. Por defecto va `orig`, el PID original escrito como RST, porque da el PWM que ya funcionaba; las otras tres se eligen en el panel. **Falta probarlo en el robot** |
 | Gemelo digital en RViz | Hecho; `/tf` y `/joint_states` comprobados con el simulador. **Falta verlo con el robot real** |
-| Proceso repetitivo de la secuencia asignada | Hecho en `ros2/secuencia.yaml`: 16 huecos en 4 placas, con servo y atornillado. 16 de 16 `ok` en simulación. **Falta probarlo en el robot** |
-| Modelo de M3 de 200 rpm; corriente, presión y avance del tornillo | Hecho: `src/screw.c`. Motor supuesto Pololu 37D 50:1, sin medir. Ver `docs/m3/REPORTE_M3.md` |
-| Servo MG90S en lugar del sensor de corriente | Hecho en firmware (J13, GPIO32). **Falta probarlo: la señal pasa por R40 en serie** |
+| Proceso repetitivo de la secuencia asignada | 16 huecos en 4 PCB, con servo y M3, y se puede elegir una sola PCB. Los 16 huecos pasaron en el robot con el firmware sin ROS. **Falta probarlo por ROS en el robot, y la punta aún no gira: no atornilla** |
+| Modelo de M3 de 200 rpm; corriente, presión y avance del tornillo | Hecho en `src/screw.c` para el diseño anterior, en el que M3 hacía girar la punta. Hoy M3 solo sube y baja, así que **no se usa en el proceso** |
+| Servo del destornillador en lugar del sensor de corriente | Hecho y en uso (J13, GPIO32). Cambios de la placa en `docs/MANUAL.md` |
 | Manual de uso | `docs/MANUAL.md` y su copia en Notion |
 | Botón de paro de emergencia | En el firmware y el panel. El corte físico de 12 V es hardware, según `CONEXIONES_BORNERAS_v7-1.pdf`. **Falta probarlo en el robot** |
 | Robot funcionando al 100 % | **Solo se puede comprobar en el robot** |
@@ -36,22 +36,34 @@ source /opt/ros/jazzy/setup.bash && sh tools/host_tests/run.sh
 
 Incluye cinemática, RST (contra la referencia en Python), simulación completa del firmware, intérprete de comandos, secuencia, panel sin pantalla y extremo a extremo con ROS 2 real. Medición del panel: `python3 tools/sim/bench_panel.py`.
 
-## Lo que falta verificar en el robot
+## Sin ROS
 
-- Nada del RST, del paro por software ni de la activación por motor se ha ejecutado en la tarjeta. El firmware **compila** contra ESP-IDF con micro-ROS; no se ha cargado.
-- La inercia de los eslabones es una estimación: medirla y volver a correr `tools/rst/simulate.py`.
-- M3: sentido, encoder en J8, modelo y tornillo. La lista completa está en `docs/m3/REPORTE_M3.md`, sección 7.
-- Servo: señal por R40, ángulos y caída de los 5 V cuando se mueve.
-- El brazo no tiene eje z: comprueba la altura y cómo baja M3 con el tornillo. Tras cada tornillo, M3 sube 18,5 s girando al revés, lo que añade unos 5 minutos a los 16 huecos. Se supone que la punta se suelta sola del tornillo, así que la subida no lo afloja, y el simulador lo modela así. Compruébalo con el primer tornillo. Si no se suelta, según el simulador M3 desenrosca unas 10 de las 12 vueltas: cambia esa subida en `ros2/secuencia.yaml`.
-- Enlace a 460800 baudios (ver `UBUNTU_MICROROS.md`, sección 6).
-- Sobrepaso del final de carrera en Home: la simulación da 4,5°, cerca del tope duro simulado de 5°. Antes esa prueba exigía menos de 3° y fallaba sin que nadie lo viera.
-- `Guia_operacion_SCARA_ROS2.pdf` es anterior a estos cambios.
+El firmware también funciona sin ROS: se maneja por texto desde el monitor de PlatformIO, y el proceso corre en el ESP32 (`src/proceso.c`).
 
----
+```bash
+python tools/uros_select.py text
+pio run -t fullclean
+pio run -t upload
+pio device monitor
+```
 
-# Referencia del firmware
+Después: `m3 home`, `5` y `proceso`. Para una sola PCB: `proceso pcb 2`. También hay `proceso ensayo` y `proceso lista`; `help` los muestra todos. Vuelve a ROS con `python tools/uros_select.py serial`.
 
-Punto a punto, primera puesta en marcha y protocolo de texto. Control por teclado por serial (flechas + espacio como dead-man). La corriente de M3 se calcula con su modelo, porque el servo ocupa el sitio del sensor; el motor 3 arranca desactivado y se activa con `motor 3 on`.
+## Calibración
+
+Medida en el robot: L1 = 125 mm, L2 = 105 mm hasta la punta, J1 con 8400 cuentas por vuelta y J2 con unas 7350. M3 recorre 24,855 vueltas entre 106 y 6 mm. El detalle y lo que se pidió están en [`docs/CAMBIO_SERVO_DESTORNILLADOR.md`](docs/CAMBIO_SERVO_DESTORNILLADOR.md).
+
+## Lo que falta verificar
+
+- **Por ROS en el robot:** todo el camino por micro-ROS con el panel. En el robot solo se probó el firmware sin ROS, con el proceso completo.
+- **Selección de PCB y M3 desde el lazo de control:** se agregaron después de esa prueba, y aún no se han probado en el robot.
+- **Pruebas en el PC:** `sh tools/host_tests/run.sh` y `tools/sim/test_e2e.py` no se han corrido con estos cambios, porque el PC usado no tiene `gcc`, ROS 2 ni Qt. Solo pasan las de la secuencia en Python. El C y el panel pasaron revisión de sintaxis; es posible que alguna prueba de `sim_control.c` necesite ajustarse.
+- **J2:** su escala está menos segura que la de J1, y su recorrido medido ha variado entre un Home y otro.
+- **Juego del reductor:** el encoder está en el motor y no lo ve.
+- **La punta no gira:** falta decidir cómo atornillar. Nada detecta un tornillo que no cayó.
+- **RST:** por defecto va el PID, porque el RST se movía muy fuerte en el robot. Se prueba con `ctrl rst`.
+- **Enlace a 460800 baudios:** ver `UBUNTU_MICROROS.md`, sección 6.
+- **Documentos anteriores:** `docs/m3/REPORTE_M3.md` y `Guia_operacion_SCARA_ROS2.pdf` son del diseño anterior.
 
 ## Estructura
 

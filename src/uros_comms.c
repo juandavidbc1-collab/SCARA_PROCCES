@@ -70,6 +70,7 @@ enum { STATE_Q1_DEG = 0, STATE_Q2_DEG, STATE_X, STATE_Y, STATE_MODE, STATE_FAULT
        /* Atornillado. Calculado con el modelo de M3: no hay sensor de corriente. */
        STATE_TOOL_I, STATE_TOOL_TORQUE, STATE_TOOL_FUERZA, STATE_TOOL_PRESION, STATE_TOOL_VUELTAS, STATE_TOOL_PROF,
        STATE_SERVO_DEG, STATE_SCREW_FASE,
+       STATE_M3_REF, STATE_M3_VUELTAS,   /* M3 ya halló su tope de arriba; vueltas desde ese tope */
        STATE_N };
 
 /* modo: 0 OFF, 1 HOMING, 2 HOLD, 3 MOVE, 4 JOG, 5 PULSE, 6 FAULT  (ctl_mode_t) */
@@ -177,6 +178,8 @@ static void timer_cb(rcl_timer_t *t, int64_t last_call_time)
     state_data[STATE_TOOL_PROF]    = s.tool_prof;
     state_data[STATE_SERVO_DEG]    = s.servo_deg;
     state_data[STATE_SCREW_FASE]   = (float)s.screw_fase;
+    state_data[STATE_M3_REF]       = s.m3_ref ? 1.0f : 0.0f;
+    state_data[STATE_M3_VUELTAS]   = s.m3_vueltas;
     (void)rcl_publish(&pub_state, &msg_state, NULL);
 
     /* /scara/ee_position repite x e y de /scara/state: a 5 Hz para liberar el enlace serie */

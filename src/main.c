@@ -6,7 +6,8 @@
  *   pid.c         PID + prealimentación + fricción         (puro, probado en PC)
  *   traj.c        perfil trapezoidal sincronizado           (puro, probado en PC)
  *   kinematics.c  cinemática directa e inversa              (puro, probado en PC)
- *   comms.c       protocolo de texto por serial (más adelante: capa micro-ROS con las mismas funciones)
+ *   comms.c       protocolo de texto por serial
+ *   proceso.c     los 16 huecos: traducción de la secuencia que antes corría en ROS
  */
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"

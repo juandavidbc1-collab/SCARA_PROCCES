@@ -150,9 +150,9 @@ python3 ros2/scara_teleop_ros.py            # respaldo liviano: ESPACIO (mantene
 
 Campos nuevos al final de `/scara/state`: índice 13 motores activos (bit 0 J1, bit 1 J2, bit 2 M3), índice 14 controlador (0 PID; 1, 2, 3, 4, 5 RST posicional, incremental, enmascarado, PID original, a medida), índice 15 PWM de M3. Falla 6 = paro de emergencia.
 
-Atornillado, calculado con el modelo de M3: 16 corriente [A], 17 torque [N·m], 18 fuerza [N], 19 presión [MPa], 20 vueltas, 21 profundidad [mm], 22 servo [grados], 23 fase (0 sin atornillar, 1 rápido, 2 lento, 3 apriete, 4 terminado).
+Atornillado, calculado con el modelo de M3: 16 corriente [A], 17 torque [N·m], 18 fuerza [N], 19 presión [MPa], 20 vueltas, 21 profundidad [mm], 22 servo [grados], 23 fase (0 sin atornillar, 1 rápido, 2 lento, 3 apriete, 4 terminado). M3: 24 ya halló su tope (1/0), 25 vueltas desde ese tope.
 
-Comandos nuevos de `/scara/cmd`: `estop`, `motor 1|2|3 on|off`, `tool pct`, `servo grados|abrir|cerrar`, `screw [vueltas torque]`, `ctrl pid|rst`, `rstform pos|inc|mask|orig`, `rst`, `rst j kp ki kd s1 b c kff`.
+Comandos nuevos de `/scara/cmd`: `estop`, `motor 1|2|3 on|off`, `tool pct`, `servo grados|subir|bajar`, `m3 home|subir|trabajo|bajar|ir v|estado`, `screw [vueltas torque]`, `ctrl pid|rst`, `rstform pos|inc|mask|orig`, `rst`, `rst j kp ki kd s1 b c kff`.
 
 Al terminar cada tornillo, `/scara/event` publica `#TORNILLO: ok vueltas=12.18 prof=6.09mm avance=101% torque=0.382Nm fuerza=587N presion=37.4MPa corriente=1.18A t=7.9s`. El resultado puede ser `ok`, `sin_apriete`, `trabado`, `flojo`, `tiempo`, `sobrecorriente` o `cancelado`.
 

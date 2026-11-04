@@ -5,7 +5,7 @@
  *
  * Modelo: dos motores Pololu 37D (R, L, Ke, J, B de la hoja de datos) con reductor 100.37:1, fricción seca, encoder
  * cuantizado, finales de carrera y tope duro 5 grados más allá de ellos. Ejes desacoplados.
- * M3: Pololu 37D 50:1 con un tornillo que cae cuando el servo se abre y se aprieta al asentar la cabeza.
+ * M3: Pololu 37D 50:1 con un tornillo que cae cuando el servo sube el destornillador y se aprieta al asentar la cabeza.
  */
 #pragma once
 /* ---------------- reloj simulado y stubs de FreeRTOS ---------------- */
@@ -66,7 +66,7 @@ void hal_motor_drive(int j, int duty)
 int32_t hal_enc_raw(int j)
 {
     if (enc_desconectado[j]) return enc_frozen[j];
-    return (int32_t)floor(P[j].th / NGEAR / (2 * M_PI) * ENC_CUENTAS_SALIDA) * enc_sign_fisico[j];
+    return (int32_t)floor(P[j].th / NGEAR * JC[j].k) * enc_sign_fisico[j];   /* q del firmware = ángulo físico */
 }
 int hal_enc_levels(int j) { (void)j; return 0; }
 bool hal_fc_raw(int j, int side)
@@ -82,8 +82,9 @@ int32_t hal_tool_enc_raw(void)
 }
 void hal_servo_set_deg(float deg)
 {
-    /* Al abrirse, cae un tornillo nuevo sobre el hueco; tiene que llegar a M3 antes de atornillar. */
-    if (deg > SERVO_GRADOS_MAX / 4 && g_servo_deg <= SERVO_GRADOS_MAX / 4 && g_servo_deg >= 0.0f) {
+    /* Al subir el destornillador, cae un tornillo nuevo sobre el hueco; tiene que llegar a M3 antes de atornillar. */
+    const float mitad = fabsf(SERVO_ARRIBA_DEG - SERVO_ABAJO_DEG) / 2;
+    if (fabsf(deg - SERVO_ABAJO_DEG) > mitad && fabsf(g_servo_deg - SERVO_ABAJO_DEG) <= mitad) {
         g_m3_th_tornillo = g_screw_mode == SIM_TORNILLO_NO_CAE ? NAN : g_m3_th;
         g_m3_barrido = false;
     }
@@ -100,7 +101,7 @@ static double m3_par_tornillo(void)
     const double vueltas = (g_m3_th - g_m3_th_tornillo) / (2 * M_PI);
     if (vueltas < 0.0) return 0.0;
     if (g_m3_barrido) return 0.005;
-    const double asiento = g_screw_mode == SIM_TORNILLO_ATASCO ? 3.0 : SCREW_VUELTAS_META;
+    const double asiento = g_screw_mode == SIM_TORNILLO_ATASCO ? 3.0 : 12.0;   /* tornillo de 6 mm */
     const double par = M3_MODEL.torque_rosca + (vueltas > asiento ? 0.32 * (vueltas - asiento) * 2 * M_PI : 0.0);
     if (g_screw_mode == SIM_TORNILLO_BARRIDO && par > 0.25) { g_m3_barrido = true; return 0.005; }
     return par;
@@ -112,7 +113,7 @@ static void m3_planta_1ms(void)
     const double J = 0.0049, dt = 1e-4;   /* inercia en el eje de salida: constante mecánica de unos 50 ms, estimada */
     const double Tf = Kt * M3_MODEL.i0;
     const bool activo = g_stby && g_power && g_tool_duty != 0;
-    const double V = activo ? g_tool_duty * TOOL_MOTOR_SIGN / 1023.0 * 12.0 : 0.0;
+    const double V = activo ? g_tool_duty / 1023.0 * 12.0 : 0.0;   /* la planta supone los signos bien puestos: duty > 0 aprieta */
     if (V < 0.0) g_m3_th_tornillo = NAN;   /* supuesto sin medir: al girar al revés, la punta se suelta sola del tornillo */
     for (int k = 0; k < 10; k++) {
         const double par = m3_par_tornillo();
@@ -126,6 +127,7 @@ static void m3_planta_1ms(void)
         if ((g_m3_w > 0.0 && wn < 0.0) || (g_m3_w < 0.0 && wn > 0.0)) wn = 0.0;
         g_m3_w = wn;
         g_m3_th += g_m3_w * dt;
+        if (g_m3_th < -2 * M_PI * 0.66) { g_m3_th = -2 * M_PI * 0.66; g_m3_w = 0.0; }   /* tope físico de arriba, medido en el robot */
         g_m3_torque_real = par;
     }
 }

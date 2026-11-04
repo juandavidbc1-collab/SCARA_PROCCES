@@ -74,8 +74,9 @@ class Sim:
 
 
 def drop(sim):
-    sim.cmd("servo abrir"); sim.run(400)
-    sim.cmd("servo cerrar"); sim.run(600)
+    sim.cmd("servo bajar"); sim.run(400)   # arranca en 0 grados: sin esto, el primer tornillo no caería
+    sim.cmd("servo subir"); sim.run(400)
+    sim.cmd("servo bajar"); sim.run(600)
 
 
 def screw(sim, mode=NORMAL, factors=(1.0, 1.0, 1.0)):
@@ -114,7 +115,7 @@ def run_process(sim, seq):
         seen = len(sim.events)
         r.tick()
         step = r.steps[r.index] if r.running else None
-        if step is not last and step and step.get("text") == "servo abrir":
+        if step is not last and step and step.get("text") == "servo subir":
             g = r.steps[r.index - 2]
             s = sim.state()
             errors[r.steps[r.index + 4]["label"]] = math.hypot(s[2] - g["x"], s[3] - g["y"])
@@ -270,10 +271,10 @@ Secuencia: `ros2/secuencia.yaml`. Base del brazo en (15; 0) cm, placas de 38 mm 
 
 - Modelo y relación de M3, y sus valores R, Ke y Kt.
 - Tornillo real: paso, largo, material y torque de apriete. Valores actuales: 12 vueltas, 0,4 N·m.
-- Sentido de M3 y del encoder (`TOOL_MOTOR_SIGN`, `TOOL_ENC_SIGN`) y cuentas por vuelta (`TOOL_ENC_CUENTAS`).
-- Ángulos del servo (`SERVO_CERRADO_DEG`, `SERVO_ABIERTO_DEG`).
-- **Señal del servo:** va por R40 (10 kΩ) en serie. Si tiembla o no responde, puentea R40.
-- **Alimentación del servo:** el MG90S puede pedir unos 700 mA calado, de los mismos 5 V del LM2596 que alimentan encoders y lógica. Comprueba que el ESP32 no se reinicie cuando el servo se mueve.
+- Que al bajar M3 la punta gire en el sentido de apretar (`TOOL_MOTOR_SIGN` y `TOOL_ENC_SIGN` ya bajan M3 con PWM positivo), y cuentas por vuelta (`TOOL_ENC_CUENTAS`).
+- Ángulo de subida del servo (`SERVO_ARRIBA_DEG`). Arranca en 0 grados (`SERVO_INICIO_DEG`) y el destornillador abajo es -180 (`SERVO_ABAJO_DEG`).
+- **Señal del servo:** en la placa, cambia R40 por 330 Ω y retira C14. R41 se queda.
+- **Alimentación del servo:** el MG90S puede pedir unos 700 mA calado, de los mismos 5 V del LM2596 que alimentan encoders y lógica. Pon 470 µF entre los pines 1 (+) y 3 (-) de J13 y comprueba que el ESP32 no se reinicie cuando el servo se mueve.
 - **Altura:** el brazo no tiene eje z. Comprueba que la punta pase sobre las placas sin chocar en los traslados, y que M3 baje con el tornillo mientras este entra (6 mm).
 - Posición de los huecos: se midió en la imagen, con unos ±0,1 mm.
 - Origen: (14,5; −20) cm queda fuera de alcance por 1 cm. Si en el robot real debe llegar ahí, hay que mover la base o alargar el brazo.

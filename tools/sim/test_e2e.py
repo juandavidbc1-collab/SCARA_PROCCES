@@ -121,6 +121,9 @@ class E2E(unittest.TestCase):
     def test_04_motor_toggle_is_reported(self):
         self.n.cmd("motor 3 on")
         self.n.wait(lambda: int(self.n.state[13]) & 4, 3, "M3 activo")
+        n_ev = len(self.n.ev)
+        self.n.cmd("m3 home")
+        self.n.wait(lambda: any(e.startswith("#M3") for e in self.n.ev[n_ev:]), 40, "M3 halla su tope")
         self.n.cmd("tool 50")
         self.n.wait(lambda: abs(self.n.state[15]) > 100, 3, "M3 gira")
         self.n.cmd("motor 3 off")
@@ -149,55 +152,32 @@ class E2E(unittest.TestCase):
         by_id = {m.id: m for m in self.n.markers}
         self.assertEqual(len(by_id[20].points), 4, "las 4 placas")
         self.assertEqual(len(by_id[21].points), 16, "los 16 huecos")
-        self.assertAlmostEqual(by_id[20].points[3].y, -0.150, places=3, msg="placa D en el marco de la base")
+        self.assertAlmostEqual(by_id[20].points[3].y, -0.102, places=3, msg="placa D en el marco de la base")
 
-    def test_06c_full_process_screws_all_holes(self):
-        with open(os.path.join(ROOT, "ros2", "secuencia.yaml")) as f:
-            text = f.read()
-        self.assertIn("subir_s: 18.5", text)
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(text.replace("subir_s: 18.5", "subir_s: 1.85"))   # el simulador va a x10 y la secuencia cuenta tiempo real
-        self.addCleanup(os.unlink, f.name)
-        self._run_process_until_done(sq.load_sequence_full(f.name))
+    def test_06c_full_process_visits_all_holes(self):
+        self._run_process_until_done(sq.load_sequence_full(os.path.join(ROOT, "ros2", "secuencia.yaml")))
         self.assertEqual(self.runner.state, "done", self.runner.reason)
-        self.assertEqual(len(self.runner.results), 16)
-        self.assertTrue(all(r["resultado"] == "ok" for r in self.runner.results), self.runner.results)
-        for r in self.runner.results:
-            self.assertAlmostEqual(r["vueltas"], 12.0, delta=1.0, msg=r["hueco"])
-            self.assertAlmostEqual(r["torque"], 0.4, delta=0.08, msg=r["hueco"])
-            self.assertGreater(r["fuerza"], 300.0, r["hueco"])
-        self.assertLess(max(self.errors), 1.0, "error de posición al soltar el tornillo [mm]: %s" % self.errors)
-        self.n.wait(lambda: abs(self.n.state[2] - self.seq.process.origin[0]) < 2.0, 5, "vuelve al origen")
+        self.assertEqual([r["resultado"] for r in self.runner.results], ["hecho"] * 16)
+        self.assertLess(max(self.errors), 1.0, "error de posición al subir el servo [mm]: %s" % self.errors)
+        self.n.wait(lambda: abs(self.n.state[2] - sq.L1_MM - sq.L2_MM) < 2.0, 15, "vuelve a 0 0")
 
-    def test_06d_stripped_screw_aborts_the_process(self):
-        self.n.inj_p.publish(String(data="screw barrido"))
-        self.n.spin(0.2)
-        self._run_process_until_done()
-        self.n.inj_p.publish(String(data="screw normal"))
-        self.assertEqual(self.runner.state, "aborted")
-        self.assertIn("sin_apriete", self.runner.reason)
-        self.assertEqual(len(self.runner.results), 1, "no sigue con el siguiente hueco")
-
-    def test_06e_rehearsal_moves_m3_down_and_up_without_screws(self):
-        with open(os.path.join(ROOT, "ros2", "secuencia.yaml")) as f:
-            text = f.read()
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(text + "  ensayo: {potencia: 40, bajar_s: 0.3}\n")
-        self.addCleanup(os.unlink, f.name)
-        duties, servos = [], []
-        n_ev = len(self.n.ev)
-        self._run_process_until_done(sq.load_sequence_full(f.name, ensayo=True), lambda s: (duties.append(s[15]), servos.append(s[22])))
+    def test_06d_one_pcb_visits_only_its_holes(self):
+        self._run_process_until_done(sq.load_sequence_full(os.path.join(ROOT, "ros2", "secuencia.yaml"), pcb=2))
         self.assertEqual(self.runner.state, "done", self.runner.reason)
-        self.assertEqual([r["resultado"] for r in self.runner.results], ["ensayado"] * 16)
-        self.assertFalse([e for e in self.n.ev[n_ev:] if e.startswith("#TORNILLO")])
-        self.assertEqual(max(servos), 0.0, "el servo no se abre")
-        self.assertGreater(max(duties), 200.0, "baja")
-        self.assertLess(min(duties), -200.0, "sube")
+        self.assertEqual([r["hueco"] for r in self.runner.results], ["B-H2", "B-H4", "B-H3", "B-H1"])
+
+    def test_06e_rehearsal_does_not_move_the_servo(self):
+        servos = []
+        self._run_process_until_done(sq.load_sequence_full(os.path.join(ROOT, "ros2", "secuencia.yaml"), ensayo=True, pcb=1), lambda s: servos.append(s[22]))
+        self.assertEqual(self.runner.state, "done", self.runner.reason)
+        self.assertEqual([r["resultado"] for r in self.runner.results], ["ensayado"] * 4)
+        self.assertEqual(len(set(servos)), 1, "el servo no se mueve")
 
     def _run_process_until_done(self, seq=None, watch=None):
         self.seq = seq or sq.load_sequence_full(os.path.join(ROOT, "ros2", "secuencia.yaml"))
-        self.n.cmd("motor 3 on")
-        self.n.wait(lambda: int(self.n.state[13]) & 4, 3, "M3 activo")
+        n_ev = len(self.n.ev)
+        self.n.cmd("m3 home")
+        self.n.wait(lambda: any(e.startswith("#M3") for e in self.n.ev[n_ev:]), 40, "M3 halla su tope")
         self.errors = []
         self.runner = sq.SequenceRunner(self.seq.steps, 1, self.n.cmd, time.monotonic)
         seen = len(self.n.ev)
@@ -214,7 +194,7 @@ class E2E(unittest.TestCase):
                 watch(self.n.state)
             step = self.runner.steps[self.runner.index] if self.runner.running else None
             if step and step is not last:
-                if step.get("text") == "servo abrir":
+                if step.get("text") == "servo subir":
                     g = self.runner.steps[self.runner.index - 2]
                     self.errors.append(math.hypot(self.n.state[2] - g["x"], self.n.state[3] - g["y"]))
                 last = step
@@ -228,142 +208,6 @@ class E2E(unittest.TestCase):
         self.n.inj_p.publish(String(data="free 1"))
         self.n.cmd("clear")
         self.n.wait(lambda: self.n.state[4] == OFF, 3, "clear")
-
-
-class RehearsalDrift(unittest.TestCase):
-    """Sin ROS, con el firmware real: M3 debe volver a la misma altura tras los 16 huecos."""
-
-    def test_m3_returns_to_the_start_after_all_holes(self):
-        subprocess.run(["sh", os.path.join(ROOT, "tools", "sim", "build.sh")], check=True)
-        lib = ctypes.CDLL(os.path.join(ROOT, "tools", "sim", "build", "libscara_sim.so"))
-        lib.sim_cmd.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-        lib.sim_event_pop.argtypes = [ctypes.c_char_p, ctypes.c_int]
-        lib.sim_state.argtypes = [ctypes.POINTER(ctypes.c_float)]
-        lib.sim_m3_real.argtypes = [ctypes.POINTER(ctypes.c_double)]
-        buf, st, real = ctypes.create_string_buffer(240), (ctypes.c_float * 24)(), (ctypes.c_double * 3)()
-        events = []
-
-        def cmd(text):
-            lib.sim_cmd(text.encode(), buf, len(buf))
-
-        def run(ms):
-            lib.sim_step_ms(ms)
-            while lib.sim_event_pop(buf, len(buf)):
-                events.append(buf.value.decode())
-
-        lib.sim_init()
-        cmd("motor 3 on")
-        run(20)
-        cmd("home")
-        for _ in range(4000):
-            run(20)
-            lib.sim_state(st)
-            if st[6] and st[7] and st[4] == 2:
-                break
-        now = [0.0]
-        seq = sq.load_sequence_full(os.path.join(ROOT, "ros2", "secuencia.yaml"), ensayo=True)
-        r = sq.SequenceRunner(seq.steps, 1, cmd, lambda: now[0])
-        r.start()
-        seen, angle = 0, 0.0
-        while r.running and now[0] < 600:
-            run(1)
-            now[0] += 0.001
-            for e in events[seen:]:
-                r.on_event(e)
-            seen = len(events)
-            r.tick()
-            lib.sim_m3_real(real)
-            angle += real[2] * 0.001
-        self.assertEqual(r.state, "done", r.reason)
-        self.assertLess(abs(angle) / (2 * math.pi), 0.05, "vueltas de M3 que no volvieron")
-
-
-class M3Height(unittest.TestCase):
-    def test_a_screw_still_tightens_with_m3_above_its_starting_point(self):
-        subprocess.run(["sh", os.path.join(ROOT, "tools", "sim", "build.sh")], check=True)
-        lib = ctypes.CDLL(os.path.join(ROOT, "tools", "sim", "build", "libscara_sim.so"))
-        lib.sim_cmd.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-        lib.sim_event_pop.argtypes = [ctypes.c_char_p, ctypes.c_int]
-        buf = ctypes.create_string_buffer(240)
-        events = []
-
-        def cmd(text):
-            lib.sim_cmd(text.encode(), buf, len(buf))
-
-        def run(ms):
-            lib.sim_step_ms(ms)
-            while lib.sim_event_pop(buf, len(buf)):
-                events.append(buf.value.decode())
-
-        lib.sim_init()
-        cmd("motor 3 on")
-        run(20)
-        for _ in range(4):                  # 20 s subiendo: el ángulo de M3 queda negativo
-            cmd("tool -35")
-            run(5000)
-        cmd("tool 0")
-        run(500)
-        cmd("servo abrir")
-        run(400)
-        cmd("servo cerrar")
-        run(600)
-        cmd("screw 12 0.4")
-        for _ in range(60):
-            run(1000)
-            if any(e.startswith("#TORNILLO") for e in events):
-                break
-        self.assertEqual(len([e for e in events if e.startswith("#TORNILLO")]), 1, events)
-        lib.sim_m3_real.argtypes = [ctypes.POINTER(ctypes.c_double)]
-        real = (ctypes.c_double * 3)()
-        lib.sim_m3_real(real)
-        self.assertGreater(real[1], 0.2, "par real sobre el tornillo [N·m]")
-
-    def test_m3_comes_back_up_after_each_real_screw(self):
-        subprocess.run(["sh", os.path.join(ROOT, "tools", "sim", "build.sh")], check=True)
-        lib = ctypes.CDLL(os.path.join(ROOT, "tools", "sim", "build", "libscara_sim.so"))
-        lib.sim_cmd.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-        lib.sim_event_pop.argtypes = [ctypes.c_char_p, ctypes.c_int]
-        lib.sim_state.argtypes = [ctypes.POINTER(ctypes.c_float)]
-        lib.sim_m3_real.argtypes = [ctypes.POINTER(ctypes.c_double)]
-        buf, st, real = ctypes.create_string_buffer(240), (ctypes.c_float * 24)(), (ctypes.c_double * 3)()
-        events = []
-
-        def cmd(text):
-            lib.sim_cmd(text.encode(), buf, len(buf))
-
-        def run(ms):
-            lib.sim_step_ms(ms)
-            while lib.sim_event_pop(buf, len(buf)):
-                events.append(buf.value.decode())
-
-        lib.sim_init()
-        cmd("motor 3 on")
-        run(20)
-        cmd("home")
-        for _ in range(4000):
-            run(20)
-            lib.sim_state(st)
-            if st[6] and st[7] and st[4] == 2:
-                break
-        now = [0.0]
-        seq = sq.load_sequence_full(os.path.join(ROOT, "ros2", "secuencia.yaml"))
-        r = sq.SequenceRunner(seq.steps, 1, cmd, lambda: now[0])
-        r.start()
-        seen, angle = 0, 0.0
-        while r.running and now[0] < 1500:
-            run(5)
-            now[0] += 0.005
-            for e in events[seen:]:
-                r.on_event(e)
-            seen = len(events)
-            r.tick()
-            lib.sim_m3_real(real)
-            angle += real[2] * 0.005
-        self.assertEqual(r.state, "done", r.reason)
-        self.assertEqual(len(r.results), 16)
-        turns = abs(angle) / (2 * math.pi)
-        print("  vueltas de M3 que no volvieron en 16 huecos: %.2f (%.2f mm), proceso %.0f s" % (turns, turns * 0.5, now[0]))
-        self.assertLess(turns, 8.0, "menos de media vuelta por hueco")
 
 
 if __name__ == "__main__":

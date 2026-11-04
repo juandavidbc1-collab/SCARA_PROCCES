@@ -6,8 +6,8 @@ confirme cada punto. No usa ROS: quien la usa le pasa una función para enviar c
 Dos formatos (ver ros2/secuencia.yaml):
 
     repeticiones: 1
-    proceso:                   # atornillar todos los huecos de unas placas; se expande a pasos
-      base_cm, origen_cm, codo, placas_cm, lado_mm, hueco_borde_mm, asentar_s, servo, tornillo, ensayo
+    proceso:                   # recorrer todos los huecos de unas placas; se expande a pasos
+      base_cm, codo, placas_cm, lado_mm, hueco_borde_mm, asentar_s, servo, m3
 
     repeticiones: 3            # 0 = hasta que se detenga a mano
     pasos:
@@ -15,15 +15,15 @@ Dos formatos (ver ros2/secuencia.yaml):
       - angulos: [20, 90]      # q1, q2 [grados]
       - esperar: 0.5           # segundos
       - codo: -1
-      - servo: {accion: abrir, tiempo: 0.4}     # abrir, cerrar o grados
-      - atornillar: {vueltas: 12, torque: 0.4}
+      - servo: {accion: subir, tiempo: 0.4}     # subir, bajar o grados (-180 a 180)
+      - m3_ir: 18.6                             # M3 a esas vueltas desde su tope de arriba
+      - atornillar: {vueltas: 12, torque: 0.4}  # del diseño anterior, en el que M3 hacía girar la punta
       - m3: {potencia: 40, tiempo: 1.5}         # motor 3 sin control: -100..100 %, durante un tiempo [s]
 
-Si el robot informa una falla, rechaza un punto o un tornillo no queda bien, la secuencia aborta. Lo único que manda después
-es apagar M3 y cerrar el servo, si estaban en marcha.
+En cada hueco: sube el servo, baja M3, baja el servo, M3 sube 1/4 de la barra y el servo vuelve a 0. Al final, el brazo va a 0 0.
+Antes hay que hacer "m3 home" y el Home del brazo. Si el robot informa una falla o rechaza un punto, la secuencia aborta.
 
-Ensayo: load_sequence_full(path, ensayo=True) recorre los mismos huecos sin servo ni tornillo. En cada uno, M3 baja un
-tiempo y sube con la misma potencia durante el mismo tiempo. Solo aplica a los archivos con sección "proceso".
+load_sequence_full(path, pcb=2) hace solo esa placa; load_sequence_full(path, ensayo=True) no mueve el servo.
 """
 import math
 import re
@@ -31,16 +31,16 @@ from dataclasses import dataclass, field
 
 import yaml
 
-L1_MM, L2_MM = 120.0, 70.0            # mantener igual que KIN en src/config.c
+L1_MM, L2_MM = 125.0, 105.0           # mantener igual que KIN en src/config.c; L2 llega hasta la punta
 SING_MARGIN_RAD = math.radians(5.0)
-Q1_LIM_DEG = (-105.0, 120.0)          # lo que permite el firmware tras el Home; J1 tiene el tope en -108
-Q2_LIM_DEG = (-140.0, 140.0)
-ORIGEN_RADIO_MM = 188.0               # alcance máximo fuera de la singularidad, con 2 mm de margen
+Q1_LIM_DEG = (-75.7, 75.9)            # lo que midió el Home en el robot
+Q2_LIM_DEG = (-113.4, 109.0)
+M3_ABAJO_VUELTAS, M3_TRABAJO_VUELTAS = 24.855, 18.641   # M3_VUELTAS_ATORNILLAR y M3_VUELTAS_TRABAJO de src/config.h
+M3_TIMEOUT_S = 60.0                   # PROC_LIMITE_M3_S de src/config.h
 STEP_TIMEOUT_S = 25.0                 # un movimiento o un tornillo tardan menos; si no, algo anda mal
 TOOL_RENEW_S = 5.0                    # debe ser menor que TOOL_MAX_ON_MS del firmware
-ENSAYO_PCT, ENSAYO_S = 40.0, 3.5      # potencia y tiempo de bajada del ensayo si el archivo no los da
-SUBIR_PCT, SUBIR_VPS = 35.0, 0.647    # el PWM de apretar (229), y las vueltas por segundo a ese PWM según el modelo de M3
-RESULTADOS_BUENOS = ("ok", "ensayado")
+RESULTADOS_BUENOS = ("ok", "ensayado", "hecho")
+SCREW_VUELTAS_EXTRA = 2.0             # el firmware corta el tornillo a las vueltas pedidas + 2 (src/control.c)
 
 _TORNILLO = re.compile(r"#TORNILLO: (\w+) vueltas=(-?[\d.]+) prof=(-?[\d.]+)mm avance=(-?[\d.]+)% torque=(-?[\d.]+)Nm "
                        r"fuerza=(-?[\d.]+)N presion=(-?[\d.]+)MPa corriente=(-?[\d.]+)A t=(-?[\d.]+)s")
@@ -129,16 +129,20 @@ def _parse_step(raw):
             raise ValueError("el tiempo de m3 debe ser positivo")
         return {"kind": "tool", "pct": float(pct), "secs": float(secs),
                 "desc": "Motor 3 al %g %% durante %g s" % (pct, secs)}
+    if key == "m3_ir":
+        if not isinstance(val, (int, float)) or not 0 <= val <= M3_ABAJO_VUELTAS:
+            raise ValueError("m3_ir va de 0 a %g vueltas desde el tope de arriba" % M3_ABAJO_VUELTAS)
+        return _m3_ir(float(val), "M3 a %g vueltas" % val)
     if key == "codo":
         if val not in (1, -1):
             raise ValueError("codo es 1 o -1")
         return _cmd("elbow %+d" % val, "Codo %+d" % val)
     if key == "servo":
         if not isinstance(val, dict) or "accion" not in val:
-            raise ValueError("servo necesita {accion: abrir | cerrar | grados, tiempo: s}")
+            raise ValueError("servo necesita {accion: subir | bajar | grados, tiempo: s}")
         acc, secs = val["accion"], val.get("tiempo", 0.0)
-        if not (acc in ("abrir", "cerrar") or (isinstance(acc, (int, float)) and 0 <= acc <= 180)):
-            raise ValueError("la acción del servo es abrir, cerrar o de 0 a 180 grados")
+        if not (acc in ("subir", "bajar") or (isinstance(acc, (int, float)) and -180 <= acc <= 180)):
+            raise ValueError("la acción del servo es subir, bajar o de -180 a 180 grados")
         if not isinstance(secs, (int, float)) or secs < 0:
             raise ValueError("el tiempo del servo debe ser positivo")
         return _cmd("servo %s" % acc, "Servo: %s" % acc, float(secs))
@@ -149,11 +153,18 @@ def _parse_step(raw):
         if not isinstance(v, (int, float)) or not 0 < v <= 40 or not isinstance(t, (int, float)) or not 0 < t <= 1.5:
             raise ValueError("atornillar: vueltas de 0 a 40 y torque de 0 a 1.5 N·m")
         return _screw(float(v), float(t))
-    raise ValueError("orden desconocida: %s (usa ir, angulos, esperar, codo, servo, atornillar o m3)" % key)
+    raise ValueError("orden desconocida: %s (usa ir, angulos, esperar, codo, servo, m3_ir, atornillar o m3)" % key)
 
 
 def _goto(x, y, desc=None):
     return {"kind": "goto", "x": x, "y": y, "desc": desc or "Ir a x = %g, y = %g mm" % (x, y)}
+
+
+def _m3_ir(vueltas, desc, label=None):
+    s = {"kind": "m3", "vueltas": vueltas, "desc": desc}
+    if label:
+        s["label"] = label
+    return s
 
 
 def _wait(secs, desc=None):
@@ -183,23 +194,14 @@ def _positive(raw, key, name, default=None):
     return float(val)
 
 
-def _rehearse_hole(label, pct, secs, settle):
-    """M3 baja y sube por tiempo: no hay medición de altura. La espera final deja que se detenga antes de mover el brazo."""
-    down = {"kind": "tool", "pct": pct, "secs": secs, "label": label, "desc": "Bajar M3 en %s (%g %%, %g s)" % (label, pct, secs)}
-    up = {"kind": "tool", "pct": -pct, "secs": secs, "label": label, "fin": True, "desc": "Subir M3 en %s" % label}
-    pause = dict(_wait(settle, "Pausa abajo"), label=label)   # sin esta pausa, M3 pierde altura al invertir el giro
-    return [down, pause, up, _wait(settle, "Asentar")]
+def _m3_turns(pct, secs):
+    """Vueltas de M3 a ese % en lazo abierto y sin carga: modelo de src/config.c con TOOL_DUTY_MAX = 650."""
+    volts = pct / 100.0 * 650.0 / 1023.0 * 12.0
+    return max(0.0, volts - 0.2 * 2.1818) / 0.5522 / (2.0 * math.pi) * secs
 
 
-def _raise_m3(label, pct, secs, settle):
-    """Tras apretar, M3 sube por tiempo. Se gira al revés con el mismo PWM: se supone que la punta se suelta sola del tornillo, ver README."""
-    pause = dict(_wait(settle, "Pausa abajo"), label=label)
-    up = {"kind": "tool", "pct": -pct, "secs": secs, "label": label, "desc": "Subir M3 en %s (%g s)" % (label, secs)}
-    return [pause, up, _wait(settle, "Asentar")]
-
-
-def _expand_process(raw, ensayo=False):
-    """Sección "proceso" -> (pasos, Process, notas)."""
+def _expand_process(raw, ensayo=False, pcb=None):
+    """Sección "proceso" -> (pasos, Process, notas). pcb: 1, 2... para hacer solo esa placa."""
     if not isinstance(raw, dict):
         raise ValueError("proceso debe ser una sección con sus datos")
     bx, by = _pair(raw.get("base_cm"), "base_cm")
@@ -211,61 +213,49 @@ def _expand_process(raw, ensayo=False):
         raise ValueError("los huecos no caben: hueco_borde_mm debe ser menor que la mitad de lado_mm")
     placas = raw.get("placas_cm")
     if not isinstance(placas, dict) or not placas:
-        raise ValueError("placas_cm necesita al menos una placa, por ejemplo A: [29, -5]")
-    servo, tornillo = raw.get("servo") or {}, raw.get("tornillo") or {}
-    t_open, t_fall = _positive(servo, "abrir_s", "servo.abrir_s", 0.4), _positive(servo, "caida_s", "servo.caida_s", 0.6)
+        raise ValueError("placas_cm necesita al menos una placa, por ejemplo A: [17, 3.4]")
+    if pcb is not None and not (isinstance(pcb, int) and 1 <= pcb <= len(placas)):
+        raise ValueError("la PCB va de 1 a %d" % len(placas))
+    servo, m3 = raw.get("servo") or {}, raw.get("m3") or {}
+    t_up, t_down = _positive(servo, "arriba_s", "servo.arriba_s", 1.0), _positive(servo, "bajar_s", "servo.bajar_s", 1.0)
     settle = _positive(raw, "asentar_s", "asentar_s", 0.3)
-    vueltas, torque = _positive(tornillo, "vueltas", "tornillo.vueltas"), _positive(tornillo, "torque_nm", "tornillo.torque_nm")
-    bloque = raw.get("ensayo") or {}
-    pct, secs = _positive(bloque, "potencia", "ensayo.potencia", ENSAYO_PCT), _positive(bloque, "bajar_s", "ensayo.bajar_s", ENSAYO_S)
-    if not 0 < pct <= 100 or secs == 0:
-        raise ValueError("ensayo: potencia de 0 a 100 y bajar_s mayor que 0")
-
-    up_pct = _positive(tornillo, "subir_pct", "tornillo.subir_pct", SUBIR_PCT)
-    up_s = _positive(tornillo, "subir_s", "tornillo.subir_s", vueltas / SUBIR_VPS)
-    if not 0 < up_pct <= 100 or up_s == 0:
-        raise ValueError("tornillo: subir_pct de 0 a 100 y subir_s mayor que 0")
-
-    notes = []
-    ox, oy = _pair(raw.get("origen_cm"), "origen_cm")
-    ox, oy = (ox - bx) * 10.0, (oy - by) * 10.0
-    r = math.hypot(ox, oy)
-    if r > ORIGEN_RADIO_MM:
-        notes.append("El origen pedido está a %.1f mm de la base y el brazo alcanza %.0f: se usa (%.1f, %.1f) mm, en la misma dirección."
-                     % (r, L1_MM + L2_MM, ox * ORIGEN_RADIO_MM / r, oy * ORIGEN_RADIO_MM / r))
-        ox, oy = ox * ORIGEN_RADIO_MM / r, oy * ORIGEN_RADIO_MM / r
-    problem = point_problem(ox, oy, elbow)
-    if problem:
-        raise ValueError("origen: " + problem)
+    abajo, arriba = _positive(m3, "abajo_vueltas", "m3.abajo_vueltas", M3_ABAJO_VUELTAS), _positive(m3, "trabajo_vueltas", "m3.trabajo_vueltas", M3_TRABAJO_VUELTAS)
+    if not 0 < arriba < abajo <= M3_ABAJO_VUELTAS:
+        raise ValueError("m3: trabajo_vueltas debe ser menor que abajo_vueltas, y esta no puede pasar de %g" % M3_ABAJO_VUELTAS)
 
     half = side / 2.0 - edge
     boards, holes = {}, []
-    steps = [_cmd("elbow %+d" % elbow, "Codo %+d" % elbow), _goto(ox, oy, "Ir al origen")]
-    for name, center in placas.items():
+    steps = [_cmd("elbow %+d" % elbow, "Codo %+d" % elbow)]
+    for n, (name, center) in enumerate(placas.items(), start=1):
         cx, cy = _pair(center, "placa %s" % name)
         cx, cy = (cx - bx) * 10.0, (cy - by) * 10.0
         boards[str(name)] = (cx, cy)
-        # H1 y H2 a la izquierda, H3 y H4 a la derecha, como en la imagen; se recorren por el borde para no cruzar la placa.
-        for hole, sx, sy in (("H1", -1, -1), ("H3", 1, -1), ("H4", 1, 1), ("H2", -1, 1)):
+        # Primero los dos huecos de arriba y luego los dos de abajo, sin cruzar la placa.
+        for hole, sx, sy in (("H2", -1, 1), ("H4", 1, 1), ("H3", 1, -1), ("H1", -1, -1)):
             label = "%s-%s" % (name, hole)
             x, y = cx + sx * half, cy + sy * half
             problem = point_problem(x, y, elbow)
             if problem:
                 raise ValueError("hueco %s: %s" % (label, problem))
+            if pcb is not None and n != pcb:
+                continue
             holes.append({"label": label, "board": str(name), "x": x, "y": y})
             steps += [_goto(x, y, "Ir a %s (%.1f, %.1f) mm" % (label, x, y)), _wait(settle, "Asentar")]
             if ensayo:
-                steps += _rehearse_hole(label, pct, secs, settle)
+                steps += [_m3_ir(abajo, "Bajar M3 en %s" % label, label), dict(_wait(settle, "Pausa abajo"), label=label)]
             else:
-                steps += [_cmd("servo abrir", "Servo: abrir"), _wait(t_open, "Tornillo cayendo"),
-                          _cmd("servo cerrar", "Servo: cerrar"), _wait(t_fall, "Tornillo cayendo"),
-                          _screw(vueltas, torque, label)] + _raise_m3(label, up_pct, up_s, settle)
-    steps.append(_goto(ox, oy, "Volver al origen"))
-    return steps, Process(boards, holes, (ox, oy), elbow, side), notes
+                steps += [_cmd("servo subir", "Servo: subir"), _wait(t_up, "Servo subiendo"),
+                          _m3_ir(abajo, "Bajar M3 en %s" % label, label), dict(_wait(settle, "Pausa abajo"), label=label),
+                          dict(_cmd("servo bajar", "Servo: bajar"), label=label), dict(_wait(t_down, "Servo bajando"), label=label)]
+            steps.append(dict(_m3_ir(arriba, "Subir M3 1/4 de la barra en %s" % label, label), fin="ensayado" if ensayo else "hecho"))
+            if not ensayo:
+                steps += [_cmd("servo 0", "Servo: a 0"), _wait(t_down, "Servo volviendo a 0")]
+    steps.append({"kind": "ang", "a": 0.0, "b": 0.0, "desc": "Volver a 0 0"})
+    return steps, Process(boards, holes, (L1_MM + L2_MM, 0.0), elbow, side), []
 
 
-def load_sequence_full(path, ensayo=False):
-    """Devuelve un Sequence. Lanza SequenceError con un mensaje claro si el archivo no sirve."""
+def load_sequence_full(path, ensayo=False, pcb=None):
+    """Devuelve un Sequence. pcb: 1, 2... para hacer solo esa placa. Lanza SequenceError con un mensaje claro si el archivo no sirve."""
     try:
         with open(path) as f:
             data = yaml.safe_load(f)
@@ -278,7 +268,7 @@ def load_sequence_full(path, ensayo=False):
         raise SequenceError("repeticiones debe ser un entero mayor o igual a 0")
     if data.get("proceso"):
         try:
-            steps, process, notes = _expand_process(data["proceso"], ensayo)
+            steps, process, notes = _expand_process(data["proceso"], ensayo, pcb)
         except ValueError as e:
             raise SequenceError("proceso: %s" % e) from e
         return Sequence(steps, repeat, process, notes)
@@ -316,8 +306,9 @@ class SequenceRunner:
         self.cycle_times = []
         self.results = []                 # un diccionario por tornillo terminado
         self._arrived = False
+        self._m3_done = False
         self._screw_result = None
-        self._servo_open = False
+        self._servo_up = False
         self._t_step = self._t_cycle = self._t_renew = 0.0
 
     @property
@@ -336,7 +327,7 @@ class SequenceRunner:
         self.index = self.cycles_done = 0
         self.cycle_times = []
         self.results = []
-        self._servo_open = False
+        self._servo_up = False
         self._t_cycle = self.clock()
         self._begin_step()
 
@@ -357,6 +348,8 @@ class SequenceRunner:
             return
         if text.startswith("#LLEGO"):
             self._arrived = True
+        elif text.startswith("#M3"):
+            self._m3_done = True
         elif text.startswith("#TORNILLO"):
             self._screw_result = parse_tornillo(text)
         elif text.startswith(("#FALLA", "#ERROR")):
@@ -379,6 +372,13 @@ class SequenceRunner:
         elif kind == "cmd":
             if now - self._t_step >= step["secs"]:
                 self._next_step()
+        elif kind == "m3":
+            if self._m3_done:
+                if step.get("fin"):
+                    self.results.append({"hueco": step["label"], "resultado": step["fin"], "ciclo": self.cycles_done + 1})
+                self._next_step()
+            elif now - self._t_step > M3_TIMEOUT_S:
+                self._abort("M3 no llegó a tiempo en el paso %d" % (self.index + 1), send_stop=True)
         elif kind == "screw":
             if self._screw_result is not None:
                 self._finish_screw(step, self._screw_result)
@@ -406,6 +406,7 @@ class SequenceRunner:
     def _begin_step(self):
         step = self.steps[self.index]
         self._arrived = False
+        self._m3_done = False
         self._screw_result = None
         self._t_step = self._t_renew = self.clock()
         if step["kind"] == "goto":
@@ -415,9 +416,11 @@ class SequenceRunner:
         elif step["kind"] == "cmd":
             self.send(step["text"])
             if step["text"].startswith("servo "):
-                self._servo_open = step["text"] != "servo cerrar"
+                self._servo_up = step["text"] not in ("servo bajar", "servo 0")
         elif step["kind"] == "screw":
             self.send("screw %s %s" % (_fmt(step["vueltas"]), _fmt(step["torque"])))
+        elif step["kind"] == "m3":
+            self.send("m3 ir " + _fmt(step["vueltas"]))
         elif step["kind"] == "tool":
             self.send("tool " + _fmt(step["pct"]))
 
@@ -436,11 +439,11 @@ class SequenceRunner:
 
     def _tool_off_if_needed(self):
         step = self.steps[self.index]
-        if step["kind"] == "tool":
+        if step["kind"] in ("tool", "m3"):
             self.send("tool 0")
-        if self._servo_open:                 # abrir dura 0 s: casi siempre se llega aquí en la espera de después
-            self.send("servo cerrar")
-            self._servo_open = False
+        if self._servo_up:                   # subir dura 0 s: casi siempre se llega aquí en la espera de después
+            self.send("servo bajar")
+            self._servo_up = False
 
     def _abort(self, reason, send_stop):
         self._tool_off_if_needed()
