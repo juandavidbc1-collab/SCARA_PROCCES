@@ -31,7 +31,7 @@ typedef enum {
 
 typedef enum { CTRL_PID = 0, CTRL_RST } ctrl_t;
 /* Cómo entra la consigna en el RST: pesos (b, c) de P y D. Ver src/rst.h. */
-typedef enum { RST_FORM_POS = 0, RST_FORM_INC, RST_FORM_MASK, RST_FORM_ORIG, RST_FORM_CUSTOM } rst_form_t;
+typedef enum { RST_FORM_POS = 0, RST_FORM_INC, RST_FORM_PI_D, RST_FORM_MASK, RST_FORM_CUSTOM } rst_form_t;
 extern const char *const RST_FORM_NAME[];
 
 typedef struct {

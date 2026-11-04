@@ -88,7 +88,7 @@ class TestState(unittest.TestCase):
     def test_original_pid_form_has_a_name(self):
         d = [0.0] * 16
         d[14] = 4.0
-        self.assertEqual(sl.decode_state(d).ctrl, "RST PID original")
+        self.assertEqual(sl.decode_state(d).ctrl, "RST enmascarado")
 
     def test_short_message_returns_none(self):
         self.assertIsNone(sl.decode_state([1.0, 2.0]))

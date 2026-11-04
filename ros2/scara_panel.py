@@ -57,9 +57,9 @@ SHORTCUTS = {QtCore.Qt.Key_H: "home", QtCore.Qt.Key_S: "stop", QtCore.Qt.Key_O: 
              QtCore.Qt.Key_Escape: "stop"}
 RST_FIELDS = ("Kp", "Ki", "Kd", "s1", "b", "c", "Kff")
 PID_FIELDS = ("Kp", "Ki", "Kd", "Kff", "Fric")
-CTRL_LABELS = (("orig", "RST PID original"), ("pos", "RST posicional"), ("inc", "RST incremental"), ("mask", "RST enmascarado"),
+CTRL_LABELS = (("mask", "RST enmascarado"), ("pos", "RST posicional"), ("inc", "RST incremental"), ("pi_d", "RST PI-D"),
                ("pid", "PID anterior"))
-CTRL_BY_NAME = {"RST posicional": "pos", "RST incremental": "inc", "RST enmascarado": "mask", "RST PID original": "orig", "PID": "pid"}
+CTRL_BY_NAME = {"RST posicional": "pos", "RST incremental": "inc", "RST PI-D": "pi_d", "RST enmascarado": "mask", "PID": "pid"}
 HOLE_COLS = ("Hueco", "Estado", "Prof. mm", "Avance %", "Torque N·m", "Fuerza N", "Presión MPa", "Corriente A")
 HOLE_FIELDS = ("prof", "avance", "torque", "fuerza", "presion", "corriente")
 HOLE_FMT = {"prof": "%.2f", "avance": "%.0f", "torque": "%.3f", "fuerza": "%.0f", "presion": "%.1f", "corriente": "%.2f"}

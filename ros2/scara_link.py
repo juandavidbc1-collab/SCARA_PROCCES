@@ -18,7 +18,7 @@ JOG_HZ = 25
 MODES = ("OFF", "HOMING", "HOLD", "MOVE", "JOG", "PULSE", "FAULT")
 FAULTS = ("ninguna", "error de seguimiento", "motor trabado", "final de carrera inesperado", "tiempo de Home agotado",
           "MIN y MAX a la vez", "paro de emergencia")
-CTRLS = ("PID", "RST posicional", "RST incremental", "RST enmascarado", "RST PID original", "RST a medida")
+CTRLS = ("PID", "RST posicional", "RST incremental", "RST PI-D", "RST enmascarado", "RST a medida")
 SCREW_PHASES = ("Sin atornillar", "Rápido", "Lento", "Apriete", "Terminado")
 F_ESTOP = 6
 ST_MODE_FAULT = 6

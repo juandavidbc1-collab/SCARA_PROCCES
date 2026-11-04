@@ -191,11 +191,25 @@ No hay sensor de corriente: corriente, torque, fuerza y presión salen del model
 
 ![Controlador](img/panel_controlador.png)
 
-En la pestaña **Controlador** se elige entre RST PID original (por defecto, da el mismo PWM que el firmware original), RST posicional, RST incremental, RST enmascarado y el PID anterior. Se cambia con el robot en OFF o HOLD. Ahí mismo se pueden ajustar los parámetros en vivo; se pierden al reiniciar.
+El robot arranca con el **PID anterior**. En la pestaña **Controlador** se puede cambiar:
+
+| Botón | Qué es | En el robot |
+|---|---|---|
+| **PID anterior** | El PID del firmware, con sus reglas de fricción | Hizo el Home y el regreso a `0 0` |
+| **RST enmascarado** | Recibe valores de un PID y por dentro ejecuta un RST | Fue el que mejor siguió la consigna, en movimientos sueltos |
+| **RST posicional** | Diseñado por polos; la consigna entra en P, I y D | Movimientos sueltos, con un salto tardío de hasta 1,5° |
+| **RST incremental** | Diseñado por polos; la consigna entra solo por I | Hizo la PCB A completa. Se atrasa hasta 5,4° mientras se mueve |
+| **RST PI-D** | Diseñado por polos; la consigna entra en P e I, no en D | No se ha movido con él |
+
+**Cambia de controlador con el robot en OFF.** También se acepta en HOLD, pero si hay un error pequeño, el brazo puede saltar: en una prueba, J1 saltó 6,1° sin ninguna orden de movimiento. Pulsa **Apagar motores** (tecla O), elige el controlador y da la siguiente orden.
+
+Ahí mismo se pueden ajustar los parámetros en vivo; se pierden al reiniciar. En el RST enmascarado, los valores están ya convertidos: Kd y Kff no son los del PID, y además usa Kp 5000 y Ki 3000, no los del PID anterior (6000 y 6000).
+
+El firmware y el panel deben ser de la misma versión. Con un firmware anterior, **RST enmascarado** activaría la forma PI-D.
 
 ### 8. Apagar
 
-Pulsa **Apagar motores** (tecla O), cierra el panel y corta los 12 V.
+Pulsa **Apagar motores** (tecla O), cierra el panel y corta los 12 V. No dejes el robot quieto en HOLD más de lo necesario: en una prueba con RST incremental, J2 llegó a 520 PWM sin moverse y sin que saliera ninguna falla.
 
 ## Cuando algo sale mal
 

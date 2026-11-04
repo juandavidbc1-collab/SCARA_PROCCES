@@ -374,8 +374,8 @@ class PanelCase(unittest.TestCase):
 
     def test_original_pid_form_is_selectable(self):
         self.link.sent.clear()
-        self.p.ctrl_btn["orig"].click()
-        self.assertIn("rstform orig", self.link.sent)
+        self.p.ctrl_btn["mask"].click()
+        self.assertIn("rstform mask", self.link.sent)
 
     def test_tick_is_fast_with_plots_running(self):
         t0 = time.perf_counter()

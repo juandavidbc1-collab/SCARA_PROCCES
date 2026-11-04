@@ -107,9 +107,9 @@ int main(void)
     ok = uros_cmd_exec("ctrl rst", r, sizeof r);      CHECK(ok && last_ctrl == CTRL_RST, "ctrl rst");
     ok = uros_cmd_exec("ctrl x", r, sizeof r);        CHECK(!ok && n_ctrl == 2, "ctrl invalido se rechaza");
     ok = uros_cmd_exec("rstform inc", r, sizeof r);   CHECK(ok && last_form == RST_FORM_INC, "rstform inc");
-    ok = uros_cmd_exec("rstform mask", r, sizeof r);  CHECK(ok && last_form == RST_FORM_MASK, "rstform mask");
+    ok = uros_cmd_exec("rstform pi_d", r, sizeof r);  CHECK(ok && last_form == RST_FORM_PI_D, "rstform pi_d");
     ok = uros_cmd_exec("rstform pos", r, sizeof r);   CHECK(ok && last_form == RST_FORM_POS, "rstform pos");
-    ok = uros_cmd_exec("rstform orig", r, sizeof r);  CHECK(ok && last_form == RST_FORM_ORIG, "rstform orig");
+    ok = uros_cmd_exec("rstform mask", r, sizeof r);  CHECK(ok && last_form == RST_FORM_MASK, "rstform mask");
     n_form = 3;
     ok = uros_cmd_exec("servo 90", r, sizeof r);      CHECK(ok && last_servo == 90.0f, "servo 90");
     ok = uros_cmd_exec("servo subir", r, sizeof r);   CHECK(ok && last_servo == SERVO_ARRIBA_DEG, "servo subir");

@@ -7,7 +7,8 @@
  *     T = b Kp (1 - q^-1)(1 + s1 q^-1) + Ki Ts (1 + s1 q^-1) + c (Kd/Ts)(1 - q^-1)^2 + (Kff/Ts) S (1 - q^-1)
  *
  * El último término de T es la prealimentación de velocidad: no cambia polos ni ganancia estática.
- * (b, c) eligen cómo entra la consigna:  posicional (1,1), incremental I-PD (0,0), enmascarado PI-D (1,0).
+ * (b, c) eligen cómo entra la consigna:  posicional (1,1), incremental I-PD (0,0), PI-D (1,0).
+ * El enmascarado usa (1,0) con ganancias de PID: se ingresan valores de PID y corre un RST.
  * r e y en rad; u en cuentas de PWM.  Diseño y simulaciones: tools/rst/ y docs/rst/REPORTE_RST.md.
  *
  * Anti-windup: la historia de u guarda u ya saturada, así que el integrador contenido en S no se enrolla.

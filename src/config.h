@@ -147,7 +147,7 @@ extern const screw_cfg_t   SCREW_CFG;
 
 #define TELE_PERIODO_MS   100
 
-/* Controlador RST: corre cada RST_PERIOD_TICKS del lazo de 1 kHz. Con Ts = 1 ms y la forma "orig" da el mismo PWM que
+/* Controlador RST: corre cada RST_PERIOD_TICKS del lazo de 1 kHz. Con Ts = 1 ms, la forma "mask" (enmascarado) da el mismo PWM que
  * el PID original. Si cambias Ts, vuelve a generar src/rst_defaults.h con tools/rst/simulate.py. */
 #define RST_PERIOD_TICKS  1
 #define RST_TS_S          (RST_PERIOD_TICKS / (float)CONTROL_HZ)
