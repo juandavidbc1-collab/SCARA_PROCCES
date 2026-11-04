@@ -301,7 +301,8 @@ int main(void)
     #define ESPERA_TORNILLO(max_s) do { for (int t = 0; t < (int)((max_s) * 1000) && screw_activo(&S.screw); t++) correr(0.001, "m3", false); correr(0.3, "m3", false); } while (0)
     reset_sim(); correr(0.1, "boot", false);
     S.m3_ref = true;                      /* como tras "m3 home" */
-    CHECK(g_servo_deg == SERVO_INICIO_DEG, "el servo arranca en 0 grados");
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "el servo arranca abajo, sin punto medio");
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "s", false);
     ctl_cmd_screw(12.0f, 0.4f); correr(0.05, "m3", false);
     CHECK(!screw_activo(&S.screw), "sin bajar el destornillador no atornilla");
     ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.01, "s", false);

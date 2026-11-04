@@ -302,7 +302,10 @@ class PanelCase(unittest.TestCase):
         self.assertEqual(self.p.hole_table.rowCount(), 16)
         self.assertEqual(self.p.hole_table.item(0, 1).text(), "Pendiente")
         self.p.chk_ensayo.click()
-        self.assertEqual(len(servos()), 48)
+        self.assertEqual(len(servos()), 32)
+
+    def test_servo_has_no_midpoint_button(self):
+        self.assertFalse(hasattr(self.p, "btn_servo_zero"))
 
     def test_choosing_a_pcb_loads_only_its_holes(self):
         self.p.combo_pcb.setCurrentIndex(2)

@@ -20,7 +20,7 @@ Dos formatos (ver ros2/secuencia.yaml):
       - atornillar: {vueltas: 12, torque: 0.4}  # del diseño anterior, en el que M3 hacía girar la punta
       - m3: {potencia: 40, tiempo: 1.5}         # motor 3 sin control: -100..100 %, durante un tiempo [s]
 
-En cada hueco: sube el servo, baja M3, baja el servo, M3 sube 1/4 de la barra y el servo vuelve a 0. Al final, el brazo va a 0 0.
+En cada hueco: sube el servo, baja M3, baja el servo y M3 sube 1/4 de la barra. El servo no para en el medio. Al final, el brazo va a 0 0.
 Antes hay que hacer "m3 home" y el Home del brazo. Si el robot informa una falla o rechaza un punto, la secuencia aborta.
 
 load_sequence_full(path, pcb=2) hace solo esa placa; load_sequence_full(path, ensayo=True) no mueve el servo.
@@ -248,8 +248,6 @@ def _expand_process(raw, ensayo=False, pcb=None):
                           _m3_ir(abajo, "Bajar M3 en %s" % label, label), dict(_wait(settle, "Pausa abajo"), label=label),
                           dict(_cmd("servo bajar", "Servo: bajar"), label=label), dict(_wait(t_down, "Servo bajando"), label=label)]
             steps.append(dict(_m3_ir(arriba, "Subir M3 1/4 de la barra en %s" % label, label), fin="ensayado" if ensayo else "hecho"))
-            if not ensayo:
-                steps += [_cmd("servo 0", "Servo: a 0"), _wait(t_down, "Servo volviendo a 0")]
     steps.append({"kind": "ang", "a": 0.0, "b": 0.0, "desc": "Volver a 0 0"})
     return steps, Process(boards, holes, (L1_MM + L2_MM, 0.0), elbow, side), []
 

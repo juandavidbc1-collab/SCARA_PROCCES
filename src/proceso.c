@@ -51,7 +51,7 @@ static void armar(bool ensayo, int pcb)
             agregar(P_M3, M3_ENSAYO_VUELTAS, 0, h, "Bajar M3");
             agregar(P_ESPERA, PROC_ASENTAR_S, 0, h, "Pausa abajo");
         } else {
-            /* La secuencia del robot: sube el servo, baja M3, baja el servo, M3 sube 1/4 de la barra y servo a 0. */
+            /* La secuencia del robot: sube el servo, baja M3, baja el servo y M3 sube 1/4 de la barra. El servo no para en el medio. */
             agregar(P_SERVO, SERVO_ARRIBA_DEG, 0, h, "Subir el servo");
             agregar(P_ESPERA, PROC_SERVO_ARRIBA_S, 0, h, "Servo subiendo");
             agregar(P_M3, M3_VUELTAS_ATORNILLAR, 0, h, "Bajar M3");
@@ -60,10 +60,6 @@ static void armar(bool ensayo, int pcb)
             agregar(P_ESPERA, PROC_SERVO_BAJAR_S, 0, h, "Servo bajando");
         }
         agregar(P_M3, M3_VUELTAS_TRABAJO, 0, h, "Subir M3 1/4 de la barra");
-        if (!ensayo) {
-            agregar(P_SERVO, SERVO_INICIO_DEG, 0, h, "Servo a 0");
-            agregar(P_ESPERA, PROC_SERVO_BAJAR_S, 0, h, "Servo volviendo a 0");
-        }
     }
     agregar(P_ANG, 0, 0, -1, "Volver a 0 0");
 }

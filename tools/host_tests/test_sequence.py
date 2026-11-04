@@ -251,14 +251,18 @@ class TestProcess(unittest.TestCase):
     def test_every_hole_follows_the_robot_sequence(self):
         seq = self._assigned()
         i = next(k for k, s in enumerate(seq.steps) if s["kind"] == "goto")
-        un_hueco = seq.steps[i:i + 11]
-        self.assertEqual([s["kind"] for s in un_hueco], ["goto", "wait", "cmd", "wait", "m3", "wait", "cmd", "wait", "m3", "cmd", "wait"])
+        un_hueco = seq.steps[i:i + 9]
+        self.assertEqual([s["kind"] for s in un_hueco], ["goto", "wait", "cmd", "wait", "m3", "wait", "cmd", "wait", "m3"])
         self.assertEqual(un_hueco[2]["text"], "servo subir")
         self.assertEqual(un_hueco[4]["vueltas"], 24.855)
         self.assertEqual(un_hueco[6]["text"], "servo bajar")
         self.assertEqual(un_hueco[8]["vueltas"], 18.641)
         self.assertEqual(un_hueco[8]["fin"], "hecho")
-        self.assertEqual(un_hueco[9]["text"], "servo 0")
+
+    def test_servo_only_alternates_full_up_and_full_down(self):
+        seq = self._assigned()
+        servos = [s["text"] for s in seq.steps if s["kind"] == "cmd" and s["text"].startswith("servo")]
+        self.assertEqual(servos, ["servo subir", "servo bajar"] * 16)
 
     def test_process_ends_at_zero_zero(self):
         last = self._assigned().steps[-1]

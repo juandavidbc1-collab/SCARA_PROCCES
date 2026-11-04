@@ -1036,7 +1036,7 @@ void ctl_init(void)
     S.ctrl = CTRL_DEFAULT;
     S.form = RST_FORM_DEFAULT;
     S.tool_en = TOOL_ACTIVO_INIT;
-    servo_mover(SERVO_INICIO_DEG);
+    servo_mover(SERVO_ABAJO_DEG);
     {
         const bool en0[NJ] = MOTORES_INIT;
         for (int j = 0; j < NJ; j++) S.en[j] = en0[j];

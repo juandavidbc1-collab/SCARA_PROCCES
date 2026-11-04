@@ -190,7 +190,7 @@ void hal_init(void)
     for (int j = 0; j < NJ; j++) enc[j] = init_encoder(JC[j].enc_a, JC[j].enc_b);
     enc_tool = init_encoder(PIN_ENC3_A, PIN_ENC3_B);
 
-    /* 6) servo en J13: temporizador propio de 50 Hz. Siempre arranca en 0 grados. */
+    /* 6) servo en J13: temporizador propio de 50 Hz. Siempre arranca abajo. */
     ledc_timer_config_t ts = {
         .speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = SERVO_BITS, .timer_num = LEDC_TIMER_1,
         .freq_hz = SERVO_HZ, .clk_cfg = LEDC_AUTO_CLK,
@@ -201,5 +201,5 @@ void hal_init(void)
         .timer_sel = LEDC_TIMER_1, .duty = 0, .hpoint = 0,
     };
     ESP_ERROR_CHECK(ledc_channel_config(&cs));
-    hal_servo_set_deg(SERVO_INICIO_DEG);
+    hal_servo_set_deg(SERVO_ABAJO_DEG);
 }

@@ -1,7 +1,7 @@
 # PROCESO ASIGNADO: pasar por los 4 huecos de las 4 PCB, en una fila recta frente al robot.
 #
 # En cada hueco: mover el brazo -> subir el servo (baja el tornillo) -> bajar M3 -> bajar el servo (baja el destornillador)
-# -> subir M3 1/4 de la barra -> servo a 0. Al terminar, el brazo va a 0 0.
+# -> subir M3 1/4 de la barra. El servo no para en el medio. Al terminar, el brazo va a 0 0.
 # Antes de iniciar: buscar el tope de M3 y hacer Home. El panel deja elegir una sola PCB.
 #
 # Las coordenadas son en cm desde el eje de J1: +x es el brazo recto y +y es la izquierda.

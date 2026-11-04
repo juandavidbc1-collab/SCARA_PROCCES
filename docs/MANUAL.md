@@ -103,8 +103,9 @@ En cada hueco, el robot:
 2. Sube el servo a +180° para que baje el tornillo.
 3. Baja M3 hasta 6 mm de altura.
 4. Baja el servo a -180° para que baje el destornillador.
-5. Sube M3 solo 1/4 de la barra, hasta 31 mm.
-6. Lleva el servo a 0° y marca el hueco como `hecho`.
+5. Sube M3 solo 1/4 de la barra, hasta 31 mm, y marca el hueco como `hecho`.
+
+El servo solo hace la subida y la bajada completas, sin parar en el medio. Entre huecos, se queda abajo mientras el brazo se mueve.
 
 Al terminar, el brazo vuelve a `0 0`. Si hay una falla, el robot rechaza un punto o M3 se traba, la secuencia aborta y te dice por qué. Después apaga M3 y, si el servo estaba en +180°, baja el destornillador. Si M3 quedó abajo, el panel te avisa: **súbelo con Arriba antes de mover el brazo**. El brazo no se mueve con M3 por debajo de unos 29 mm.
 
@@ -161,7 +162,7 @@ En la pestaña **Motores** hay un interruptor por motor. El botón muestra lo qu
 
 ![Atornillador](img/panel_atornillador.png)
 
-En la pestaña **Atornillador** puedes mover el servo (**Subir**, **Bajar**, **A 0**) y M3:
+En la pestaña **Atornillador** puedes mover el servo (**Subir**, **Bajar**) y M3:
 
 | Botón de M3 | Qué hace |
 |---|---|
@@ -172,7 +173,7 @@ En la pestaña **Atornillador** puedes mover el servo (**Subir**, **Bajar**, **A
 
 **Atornillar aquí** es del diseño anterior, en el que M3 hacía girar la punta. **No lo uses**: M3 solo sube y baja, así que el torque que muestra esta pestaña no significa nada.
 
-**Conexión del servo (J13).** Pin 1: +5 V, cable rojo. Pin 2: señal, cable naranja. Pin 3: GND, cable marrón. En la placa, cambia R40 por 330 Ω, retira C14, deja R41 y pon 470 µF / 16 V entre los pines 1 (+) y 3 (-). El servo arranca en 0 grados y el destornillador abajo es -180 grados. Con +180 grados baja el tornillo y con -180 grados baja el destornillador; los dos están medidos en el robot.
+**Conexión del servo (J13).** Pin 1: +5 V, cable rojo. Pin 2: señal, cable naranja. Pin 3: GND, cable marrón. En la placa, cambia R40 por 330 Ω, retira C14, deja R41 y pon 470 µF / 16 V entre los pines 1 (+) y 3 (-). El servo arranca abajo, en -180 grados, y al encender los 12 V puede moverse hasta esa posición. Con +180 grados baja el tornillo y con -180 grados baja el destornillador; los dos están medidos en el robot.
 
 No hay sensor de corriente: corriente, torque, fuerza y presión salen del modelo del motor, del PWM y del encoder de M3. Durante el arranque, torque, fuerza y presión se muestran en 0 porque el motor está acelerando. **Son estimaciones hasta que calibres el modelo** con `docs/m3/REPORTE_M3.md`. La profundidad sale del encoder.
 

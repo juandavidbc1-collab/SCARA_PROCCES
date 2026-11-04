@@ -4,7 +4,7 @@ Fecha: 2026-11-03. Resume lo que se pidió y cómo quedó el robot después de p
 
 ## Lo que se pidió
 
-1. El servo no deja pasar el tornillo: mueve el destornillador. Va de -180° a 180° y siempre arranca en 0°.
+1. El servo no deja pasar el tornillo: mueve el destornillador. Va de -180° a 180°, siempre arranca abajo y solo hace la subida y la bajada completas, sin punto medio.
 2. M3 no puede bajar más de lo medido, porque casi tocaría el suelo.
 3. Indicar los cambios de la PCB para el servo y cómo se conecta.
 4. Medir a mano M3 y el servo, y usar esas medidas.
@@ -18,8 +18,7 @@ Fecha: 2026-11-03. Resume lo que se pidió y cómo quedó el robot después de p
 2. El servo sube a +180°: baja el tornillo.
 3. M3 baja hasta 6 mm.
 4. El servo baja a -180°: baja el destornillador.
-5. M3 sube 1/4 de la barra, hasta 31 mm.
-6. El servo vuelve a 0°.
+5. M3 sube 1/4 de la barra, hasta 31 mm. El servo se queda abajo mientras el brazo va al siguiente hueco.
 
 Al terminar, el brazo va a `0 0`. **La punta no gira, así que el proceso todavía no atornilla.** Se probó un motor de 5 V en J12 y se descartó.
 
