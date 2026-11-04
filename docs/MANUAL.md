@@ -40,8 +40,8 @@ El encabezado del panel debe decir **Conectado · 20 Hz**. Si dice **SIN DATOS D
 ![Panel de control](img/panel_operar.png)
 
 - **Arriba:** estado del robot, posición, controlador activo y paro de emergencia, siempre visibles.
-- **Izquierda:** vista superior del brazo y gráficas de medición, referencia y PWM.
-- **Derecha:** pestañas Operar, Motores, Atornillador, Secuencia, Controlador y Registro.
+- **Izquierda:** vista superior del brazo y gráficas de medición y referencia, error (referencia − medición) y PWM de los últimos 10 s. El error solo se dibuja con el lazo cerrado: en HOLD, MOVE y manual.
+- **Derecha:** pestañas Operar, Motores, Atornillador, Secuencia, Controlador, Gráficas y Registro.
 
 | Estado | Qué significa |
 |---|---|
@@ -110,6 +110,17 @@ El servo solo hace la subida y la bajada completas, sin parar en el medio. Entre
 Al terminar, el brazo vuelve a `0 0`. Si hay una falla, el robot rechaza un punto o M3 se traba, la secuencia aborta y te dice por qué. Después apaga M3 y, si el servo estaba en +180°, baja el destornillador. Si M3 quedó abajo, el panel te avisa: **súbelo con Arriba antes de mover el brazo**. El brazo no se mueve con M3 por debajo de unos 29 mm.
 
 **Nada detecta si un tornillo no cayó.** Tampoco se aprieta: la punta no gira.
+
+**Dónde quedó cada hueco.** La segunda tabla de la pestaña muestra, en mm:
+
+| Columna | Qué es |
+|---|---|
+| **Objetivo** y **Medido** | El punto x, y pedido y el que dio el firmware al avisar que llegó |
+| **ex** y **ey** | Medido menos objetivo |
+| **Al llegar** | Distancia entre medido y objetivo, cuando el firmware avisa que llegó |
+| **Al salir** | Distancia al objetivo cuando el hueco termina, antes de ir al siguiente |
+
+Salen de los encoders: no dicen cuánto se movió la base ni cuánto se dobla el brazo, así que no reemplazan medir sobre la placa. La tabla se borra al pulsar **Iniciar**. Si hay varias repeticiones, queda la última pasada.
 
 Si cambias el archivo, pulsa **Recargar**. Si el brazo no alcanza un hueco, el panel te dice cuál. Esto se ajusta en la sección `proceso`:
 
@@ -207,7 +218,18 @@ Ahí mismo se pueden ajustar los parámetros en vivo; se pierden al reiniciar. E
 
 El firmware y el panel deben ser de la misma versión. Con un firmware anterior, **RST enmascarado** activaría la forma PI-D.
 
-### 8. Apagar
+### 8. Ver el error y la acción de control
+
+![Gráficas](img/panel_graficas.png)
+
+A la izquierda del panel siempre están el error y el PWM de los últimos 10 s. La pestaña **Gráficas** muestra lo mismo según la posición de cada eje, en dos columnas, J1 y J2:
+
+- **Arriba, error:** referencia menos medición, en grados. Si la curva es más ancha en una zona, el eje sigue peor ahí.
+- **Abajo, PWM:** cada punto es una muestra. El límite del brazo es ±520.
+
+Solo guarda los movimientos (modo MOVE), hasta 5 minutos; después borra lo más viejo. **Limpiar** vacía las gráficas, por ejemplo antes de probar otro controlador. Lo que guardan se pierde al cerrar el panel.
+
+### 9. Apagar
 
 Pulsa **Apagar motores** (tecla O), cierra el panel y corta los 12 V. No dejes el robot quieto en HOLD más de lo necesario: en una prueba con RST incremental, J2 llegó a 520 PWM sin moverse y sin que saliera ninguna falla.
 

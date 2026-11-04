@@ -142,6 +142,17 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(r.cycle_times, [3.0])
 
 
+class TestParseLlego(unittest.TestCase):
+    def test_reads_target_measured_and_error(self):
+        a = sq.parse_llego("#LLEGO: objetivo x=154.50 y=-117.50 z=0.00 | medido x=154.87 y=-117.12 | error ex=0.371 ey=-0.383 mm | q1=66.471 q2=-65.102 deg")
+        self.assertEqual(a, {"x": 154.5, "y": -117.5, "mx": 154.87, "my": -117.12, "ex": 0.371, "ey": -0.383})
+
+    def test_other_events_are_ignored(self):
+        self.assertIsNone(sq.parse_llego("#LLEGO: q1=0.129 q2=0.049 deg | medido x=230.00 y=0.61 mm"))
+        self.assertIsNone(sq.parse_llego("#LLEGO: con aviso, falta J1 0.50, J2 0.10 deg."))
+        self.assertIsNone(sq.parse_llego("#OK: servo a 180 grados"))
+
+
 class TestLoad(unittest.TestCase):
     def load(self, text):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

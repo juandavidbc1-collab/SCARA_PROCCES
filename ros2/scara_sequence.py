@@ -77,6 +77,17 @@ def parse_tornillo(text):
     return dict(zip(_TORNILLO_CAMPOS, (float(v) for v in m.groups()[1:])), resultado=m.group(1))
 
 
+_LLEGO = re.compile(r"#LLEGO: objetivo x=(-?[\d.]+) y=(-?[\d.]+) .*medido x=(-?[\d.]+) y=(-?[\d.]+) .*error ex=(-?[\d.]+) ey=(-?[\d.]+)")
+
+
+def parse_llego(text):
+    """Evento "#LLEGO: objetivo ..." -> diccionario con objetivo, medido y error en mm; None si es otro evento."""
+    m = _LLEGO.search(text)
+    if not m:
+        return None
+    return dict(zip(("x", "y", "mx", "my", "ex", "ey"), (float(v) for v in m.groups())))
+
+
 def point_problem(x, y, elbow=None):
     """None si el brazo llega a (x, y) [mm]; si no, el motivo. Con elbow también revisa los límites de ese codo."""
     r = math.hypot(x, y)

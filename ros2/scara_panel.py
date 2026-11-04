@@ -34,6 +34,8 @@ TICK_MS = 33                  # refresco de la ventana
 PLOT_EVERY = 3                # las gráficas a 10 Hz: bastan para verlas y es lo que más cuesta dibujar
 PLOT_SECONDS = 10.0
 PLOT_POINTS = 240
+POS_POINTS = 6000             # error y PWM según la posición: 5 minutos de movimiento a 20 Hz
+POS_DRAW_EVERY = 5            # esas gráficas tienen muchos puntos: a 2 Hz, y solo con su pestaña abierta
 EVENTS_PER_TICK = 100
 LOG_LINES = 800
 STALE_S = 0.5                 # sin estado por más que esto, se avisa
@@ -63,6 +65,8 @@ CTRL_BY_NAME = {"RST posicional": "pos", "RST incremental": "inc", "RST PI-D": "
 HOLE_COLS = ("Hueco", "Estado", "Prof. mm", "Avance %", "Torque N·m", "Fuerza N", "Presión MPa", "Corriente A")
 HOLE_FIELDS = ("prof", "avance", "torque", "fuerza", "presion", "corriente")
 HOLE_FMT = {"prof": "%.2f", "avance": "%.0f", "torque": "%.3f", "fuerza": "%.0f", "presion": "%.1f", "corriente": "%.2f"}
+PLACE_COLS = ("Hueco", "Objetivo mm", "Medido mm", "ex mm", "ey mm", "Al llegar mm", "Al salir mm")
+ERROR_MODES = ("HOLD", "MOVE", "JOG")   # en los demás modos no hay lazo cerrado y la referencia no significa nada
 SCREW_DEFAULT = (12, 0.4)     # lo mismo que SCREW_VUELTAS_META y SCREW_TORQUE_META en src/config.h
 
 QSS = f"""
@@ -143,12 +147,18 @@ class ControlPanel(QtWidgets.QWidget):
 
         n = PLOT_POINTS
         self.buf_t = np.full(n, np.nan)
-        self.buf = {k: np.full(n, np.nan) for k in ("q1", "q2", "r1", "r2", "d1", "d2", "i", "tau")}
+        self.buf = {k: np.full(n, np.nan) for k in ("q1", "q2", "r1", "r2", "e1", "e2", "d1", "d2", "i", "tau")}
         self.buf_i = 0
         self.t0 = time.monotonic()
         self.trail = np.full((200, 2), np.nan)
         self.trail_i = 0
         self.target = None
+        self.process = None
+        self.pos_buf = np.full((POS_POINTS, 6), np.nan)     # q1, q2, e1, e2, d1, d2
+        self.pos_i = 0
+        self.pos_moving = False
+        self.pos_last = None
+        self.pos_drawn = 0
 
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
@@ -264,24 +274,30 @@ class ControlPanel(QtWidgets.QWidget):
         self.xy_joints = pg.ScatterPlotItem(size=11, brush=pg.mkBrush(INK), pen=None)
         self.xy.addItem(self.xy_joints)
         self.xy.scene().sigMouseClicked.connect(self._on_xy_click)
-        g.addWidget(self.xy, 0, 0, 3, 1)
+        g.addWidget(self.xy, 0, 0, 4, 1)
 
         self.p_q1 = self._plot("J1: medición y referencia", "grados")
         self.p_q2 = self._plot("J2: medición y referencia", "grados")
-        self.p_d = self._plot("PWM aplicado", "cuentas")
+        self.p_e = self._plot("Error: referencia − medición", "grados")
+        self.p_d = self._plot("Acción de control: PWM aplicado", "cuentas")
         ref_pen = pg.mkPen(color=MUTED, width=1, style=QtCore.Qt.DashLine)
         self.c_r1 = self.p_q1.plot([], [], pen=ref_pen, name="Referencia")
         self.c_q1 = self.p_q1.plot([], [], pen=pg.mkPen(color=SERIES1, width=2), name="Medición")
         self.c_r2 = self.p_q2.plot([], [], pen=ref_pen, name="Referencia")
         self.c_q2 = self.p_q2.plot([], [], pen=pg.mkPen(color=SERIES1, width=2), name="Medición")
+        self.p_e.addLegend(offset=(6, 4), labelTextColor=MUTED, brush=None)
+        self.c_e1 = self.p_e.plot([], [], pen=pg.mkPen(color=SERIES1, width=2), name="J1", connect="finite")
+        self.c_e2 = self.p_e.plot([], [], pen=pg.mkPen(color=SERIES2, width=2), name="J2", connect="finite")
         self.p_d.addLegend(offset=(6, 4), labelTextColor=MUTED, brush=None)
         self.c_d1 = self.p_d.plot([], [], pen=pg.mkPen(color=SERIES1, width=2), name="J1")
         self.c_d2 = self.p_d.plot([], [], pen=pg.mkPen(color=SERIES2, width=2), name="J2")
         self.p_q2.setXLink(self.p_q1)
+        self.p_e.setXLink(self.p_q1)
         self.p_d.setXLink(self.p_q1)
         g.addWidget(self.p_q1, 0, 1)
         g.addWidget(self.p_q2, 1, 1)
-        g.addWidget(self.p_d, 2, 1)
+        g.addWidget(self.p_e, 2, 1)
+        g.addWidget(self.p_d, 3, 1)
         g.setColumnStretch(0, 6)
         g.setColumnStretch(1, 5)
         return w
@@ -298,12 +314,14 @@ class ControlPanel(QtWidgets.QWidget):
         self.tab_screw = self._tab_screwdriver()
         self.tab_seq = self._tab_sequence()
         self.tab_ctrl = self._tab_control()
+        self.tab_plots = self._tab_plots()
         self.tab_log = self._tab_log()
         self.tabs.addTab(self.tab_op, "Operar")
         self.tabs.addTab(self.tab_motors, "Motores")
         self.tabs.addTab(self.tab_screw, "Atornillador")
         self.tabs.addTab(self.tab_seq, "Secuencia")
         self.tabs.addTab(self.tab_ctrl, "Controlador")
+        self.tabs.addTab(self.tab_plots, "Gráficas")
         self.tabs.addTab(self.tab_log, "Registro")
         return self.tabs
 
@@ -533,13 +551,13 @@ class ControlPanel(QtWidgets.QWidget):
         c.addLayout(h)
         self.seq_list = nofocus(QtWidgets.QListWidget())
         c.addWidget(self.seq_list, 1)
-        self.hole_table = nofocus(QtWidgets.QTableWidget(0, len(HOLE_COLS)))
-        self.hole_table.setHorizontalHeaderLabels(HOLE_COLS)
-        self.hole_table.verticalHeader().setVisible(False)
-        self.hole_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        self.hole_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-        self.hole_table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        self.hole_table = self._table(HOLE_COLS)
         c.addWidget(self.hole_table, 2)
+        c.addWidget(muted("Dónde quedó cada hueco, según los encoders"))
+        self.place_table = self._table(PLACE_COLS)
+        for col in (1, 2):      # objetivo y medido llevan dos números: no se pueden cortar
+            self.place_table.horizontalHeader().setSectionResizeMode(col, QtWidgets.QHeaderView.ResizeToContents)
+        c.addWidget(self.place_table, 2)
         h = QtWidgets.QHBoxLayout()
         h.addWidget(muted("Repeticiones (0 = sin fin)"))
         self.spin_repeat = QtWidgets.QSpinBox()
@@ -556,6 +574,44 @@ class ControlPanel(QtWidgets.QWidget):
         self.lbl_seq.setWordWrap(True)
         self.lbl_seq.setStyleSheet("font-weight: 600;")
         c.addWidget(self.lbl_seq)
+        v.addWidget(f, 1)
+        return w
+
+    @staticmethod
+    def _table(cols):
+        t = nofocus(QtWidgets.QTableWidget(0, len(cols)))
+        t.setHorizontalHeaderLabels(cols)
+        t.verticalHeader().setVisible(False)
+        t.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        t.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        t.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+        return t
+
+    def _tab_plots(self):
+        w = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(w)
+        f, c = card("Error y acción de control según la posición")
+        h = QtWidgets.QHBoxLayout()
+        note = muted("Guarda hasta 5 minutos de movimientos (MOVE). Cada punto es una muestra de telemetría.")
+        note.setWordWrap(True)
+        h.addWidget(note, 1)
+        h.addWidget(self._button("Limpiar", self.clear_position_plots))
+        c.addLayout(h)
+        g = QtWidgets.QGridLayout()
+        g.setSpacing(8)
+        self.c_pos_e, self.c_pos_d = [], []
+        for j, color in enumerate((SERIES1, SERIES2)):
+            pe = self._plot("J%d: error" % (j + 1), "grados")
+            pd = self._plot("J%d: PWM" % (j + 1), "cuentas")
+            pd.setLabel("bottom", "posición medida [grados]", color=MUTED)
+            for p in (pe, pd):
+                p.setClipToView(False)      # el eje x es la posición: va y vuelve, no está ordenado
+            pd.setXLink(pe)
+            self.c_pos_e.append(pe.plot([], [], pen=pg.mkPen(color=color, width=1), connect="finite"))     # más gruesa, cuesta mucho más
+            self.c_pos_d.append(pd.plot([], [], pen=None, symbol="o", symbolSize=3, symbolPen=None, symbolBrush=color))
+            g.addWidget(pe, 0, j)
+            g.addWidget(pd, 1, j)
+        c.addLayout(g, 1)
         v.addWidget(f, 1)
         return w
 
@@ -767,6 +823,7 @@ class ControlPanel(QtWidgets.QWidget):
             self.steps = []
             self.seq_list.clear()
             self.hole_table.setRowCount(0)
+            self._show_process(None)
             return
         self.load_steps(seq.steps, seq.repeat)
         self.lbl_seqnote.setText(" ".join(seq.notes))
@@ -809,6 +866,9 @@ class ControlPanel(QtWidgets.QWidget):
 
     def _show_process(self, process):
         self.process = process
+        self.place_rows = {h["label"]: row for row, h in enumerate(process.holes)} if process else {}
+        self.place_table.setRowCount(len(self.place_rows))
+        self._clear_places()
         if process is None:
             self.xy_boards.setData([], [])
             self.xy_holes.setData([], [])
@@ -820,6 +880,35 @@ class ControlPanel(QtWidgets.QWidget):
             ys += [cy - half, cy - half, cy + half, cy + half, cy - half, np.nan]
         self.xy_boards.setData(np.array(xs), np.array(ys))
         self._paint_holes()
+
+    def _clear_places(self):
+        for label, row in self.place_rows.items():
+            self.place_table.setItem(row, 0, QtWidgets.QTableWidgetItem(label))
+            for col in range(1, len(PLACE_COLS)):
+                self.place_table.setItem(row, col, QtWidgets.QTableWidgetItem(""))
+        if self.process:
+            for h in self.process.holes:
+                self.place_table.setItem(self.place_rows[h["label"]], 1, QtWidgets.QTableWidgetItem("%.2f, %.2f" % (h["x"], h["y"])))
+
+    def _show_arrival(self, a):
+        """#LLEGO con objetivo: si ese punto es un hueco del proceso, lo anota en su fila."""
+        for h in (self.process.holes if self.process else ()):
+            if abs(h["x"] - a["x"]) < 0.02 and abs(h["y"] - a["y"]) < 0.02:
+                row = self.place_rows[h["label"]]
+                vals = ("%.2f, %.2f" % (a["mx"], a["my"]), "%.3f" % a["ex"], "%.3f" % a["ey"], "%.3f" % math.hypot(a["ex"], a["ey"]))
+                for col, text in enumerate(vals, start=2):
+                    self.place_table.setItem(row, col, QtWidgets.QTableWidgetItem(text))
+                self.place_table.setItem(row, 6, QtWidgets.QTableWidgetItem(""))
+                self.place_table.scrollToItem(self.place_table.item(row, 0))
+                return
+
+    def _show_exit(self, label):
+        """Al terminar un hueco, antes de ir al siguiente: la distancia a la que quedó de verdad la punta."""
+        st = self.state
+        if st is None or label not in self.place_rows:
+            return
+        h = next(h for h in self.process.holes if h["label"] == label)
+        self.place_table.setItem(self.place_rows[label], 6, QtWidgets.QTableWidgetItem("%.3f" % math.hypot(st.x - h["x"], st.y - h["y"])))
 
     def _paint_holes(self):
         p = getattr(self, "process", None)
@@ -853,6 +942,7 @@ class ControlPanel(QtWidgets.QWidget):
             return
         for label, row in self.hole_rows.items():
             self._hole_row(row, "Pendiente", {})
+        self._clear_places()
         self.results_shown, self.hole_active = 0, None
         self.runner = sq.SequenceRunner(self.steps, self.spin_repeat.value(), self.send, time.monotonic)
         self.runner.start()
@@ -896,6 +986,7 @@ class ControlPanel(QtWidgets.QWidget):
         for res in r.results[self.results_shown:]:
             if res["hueco"] in self.hole_rows:
                 self._hole_row(self.hole_rows[res["hueco"]], res["resultado"], res)
+            self._show_exit(res["hueco"])
             self.results_shown += 1
             changed = True
         step = r.steps[r.index] if r.running else None
@@ -975,6 +1066,9 @@ class ControlPanel(QtWidgets.QWidget):
             self._set(self.lbl_screw_result, "Último tornillo: %s · %.2f mm (%.0f %%) · %.3f N·m · %.0f N · %.1f MPa · %.2f A" % (
                 res["resultado"], res["prof"], res["avance"], res["torque"], res["fuerza"], res["presion"], res["corriente"]))
         self.add_log(ev, color)
+        arrival = sq.parse_llego(ev)
+        if arrival:
+            self._show_arrival(arrival)
         if ev.startswith("#FALLA"):
             self._footer_on = True
             self._set(self.lbl_key, ev)
@@ -1087,13 +1181,44 @@ class ControlPanel(QtWidgets.QWidget):
 
         i = self.buf_i % PLOT_POINTS
         self.buf_t[i] = now - self.t0
-        for k, v in (("q1", st.q1), ("q2", st.q2), ("r1", st.ref1), ("r2", st.ref2), ("d1", st.duty1), ("d2", st.duty2),
-                     ("i", st.tool_i), ("tau", st.tool_torque)):
+        e1, e2 = (st.ref1 - st.q1, st.ref2 - st.q2) if st.mode in ERROR_MODES else (np.nan, np.nan)
+        for k, v in (("q1", st.q1), ("q2", st.q2), ("r1", st.ref1), ("r2", st.ref2), ("e1", e1), ("e2", e2), ("d1", st.duty1),
+                     ("d2", st.duty2), ("i", st.tool_i), ("tau", st.tool_torque)):
             self.buf[k][i] = v
         self.buf_i += 1
+        self._store_position_sample(st, e1, e2)
         if st.mode != "OFF" or self.trail_i == 0:
             self.trail[self.trail_i % len(self.trail)] = (st.x, st.y)
             self.trail_i += 1
+
+    def _store_position_sample(self, st, e1, e2):
+        moving = st.mode == "MOVE"
+        if moving and not self.pos_moving:      # el NaN separa un movimiento del siguiente: la línea no los une
+            self.pos_buf[self.pos_i % POS_POINTS] = np.nan
+            self.pos_i += 1
+        self.pos_moving = moving
+        sample = (st.q1, st.q2, e1, e2, st.duty1, st.duty2)
+        if moving and sample != self.pos_last:  # la ventana refresca más rápido que la telemetría: sin repetidos
+            self.pos_buf[self.pos_i % POS_POINTS] = sample
+            self.pos_i += 1
+            self.pos_last = sample
+
+    def clear_position_plots(self):
+        self.pos_buf[:] = np.nan
+        self.pos_i = 0
+        self.pos_moving = False
+        self.pos_last = None
+        self._draw_position_plots()
+
+    def _draw_position_plots(self):
+        self.pos_drawn = self.pos_i
+        n = min(self.pos_i, POS_POINTS)
+        end = self.pos_i % POS_POINTS
+        b = self.pos_buf[np.arange(end - n, end) % POS_POINTS]
+        for j in range(2):
+            self.c_pos_e[j].setData(b[:, j], b[:, 2 + j])
+            ok = np.isfinite(b[:, j])
+            self.c_pos_d[j].setData(b[ok, j], b[ok, 4 + j])
 
     def _renew_tool(self, st):
         if self.btn_tool.isChecked() and st is not None and time.monotonic() - self.tool_t > TOOL_RENEW_S:
@@ -1111,6 +1236,8 @@ class ControlPanel(QtWidgets.QWidget):
         self.c_r1.setData(t, self.buf["r1"][order])
         self.c_q2.setData(t, self.buf["q2"][order])
         self.c_r2.setData(t, self.buf["r2"][order])
+        self.c_e1.setData(t, self.buf["e1"][order])
+        self.c_e2.setData(t, self.buf["e2"][order])
         self.c_d1.setData(t, self.buf["d1"][order])
         self.c_d2.setData(t, self.buf["d2"][order])
         tn = t[-1]
@@ -1119,6 +1246,8 @@ class ControlPanel(QtWidgets.QWidget):
             self.c_i.setData(t, self.buf["i"][order])
             self.c_tau.setData(t, self.buf["tau"][order])
             self.p_i.setXRange(tn - PLOT_SECONDS, tn, padding=0)
+        if self.tabs.currentWidget() is self.tab_plots and self.ticks % (PLOT_EVERY * POS_DRAW_EVERY) == 0 and self.pos_drawn != self.pos_i:
+            self._draw_position_plots()     # solo con muestras nuevas: durante el manual no hay y no le quita tiempo al teclado
 
         i = (self.buf_i - 1) % PLOT_POINTS
         a, b = math.radians(self.buf["q1"][i]), math.radians(self.buf["q1"][i] + self.buf["q2"][i])

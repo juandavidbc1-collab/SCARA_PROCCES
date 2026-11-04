@@ -266,6 +266,70 @@ class PanelCase(unittest.TestCase):
         self.assertIsNotNone(self.p.runner)
         self.assertEqual(self.link.sent[0], "elbow -1")
 
+    def _feed(self, **changes):
+        names = {"q1": 0, "q2": 1, "x": 2, "y": 3, "mode": 4, "r1": 9, "r2": 10, "d1": 11, "d2": 12}
+        st = list(HOLD)
+        for k, v in changes.items():
+            st[names[k]] = v
+        self.link.state = st
+        self.p.tick()
+
+    def test_error_plot_is_reference_minus_measurement(self):
+        self._feed(q1=10.0, r1=12.5, q2=20.0, r2=19.0, mode=3.0)
+        i = (self.p.buf_i - 1) % sp.PLOT_POINTS
+        self.assertAlmostEqual(self.p.buf["e1"][i], 2.5)
+        self.assertAlmostEqual(self.p.buf["e2"][i], -1.0)
+
+    def test_error_plot_is_blank_without_closed_loop(self):
+        self._feed(q1=10.0, r1=70.0, mode=0.0)      # en OFF la referencia queda vieja
+        i = (self.p.buf_i - 1) % sp.PLOT_POINTS
+        self.assertTrue(self.p.buf["e1"][i] != self.p.buf["e1"][i])
+
+    def test_position_plots_keep_only_moves_without_repeats(self):
+        self._feed(q1=10.0, r1=11.0, d1=50.0, mode=2.0)
+        self.assertEqual(self.p.pos_i, 0, "en HOLD no guarda")
+        self._feed(q1=10.0, r1=11.0, d1=50.0, mode=3.0)
+        self._feed(q1=10.0, r1=11.0, d1=50.0, mode=3.0)
+        self.assertEqual(self.p.pos_i, 2, "un corte y una muestra, sin repetir")
+        self._feed(q1=12.0, r1=14.0, d1=60.0, mode=3.0)
+        self.assertEqual(self.p.pos_i, 3)
+        self.assertEqual(list(self.p.pos_buf[2][[0, 2, 4]]), [12.0, 2.0, 60.0])
+        self._feed(q1=12.0, mode=2.0)
+        self._feed(q1=13.0, r1=14.0, mode=3.0)
+        self.assertEqual(self.p.pos_i, 5, "otro movimiento empieza con su propio corte")
+
+    def test_position_plots_draw_and_clear(self):
+        self.p.tabs.setCurrentWidget(self.p.tab_plots)
+        self._feed(q1=10.0, r1=11.0, d1=50.0, mode=3.0)
+        self._feed(q1=12.0, r1=14.0, d1=60.0, mode=3.0)
+        self.p._draw_position_plots()
+        x, y = self.p.c_pos_d[0].getData()
+        self.assertEqual(list(x), [10.0, 12.0])
+        self.assertEqual(list(y), [50.0, 60.0])
+        self.p.clear_position_plots()
+        self.assertEqual(self.p.pos_i, 0)
+
+    def test_arrival_fills_where_each_hole_ended(self):
+        self.assertEqual(self.p.place_table.rowCount(), 16)
+        self.assertEqual(self.p.place_table.item(0, 0).text(), "A-H2")
+        self.assertEqual(self.p.place_table.item(0, 1).text(), "154.50, 117.50")
+        self.link.events.append("#LLEGO: objetivo x=154.50 y=117.50 z=0.00 | medido x=154.87 y=117.12 | error ex=0.371 ey=-0.383 mm | q1=66.471 q2=-65.102 deg")
+        self.p.tick()
+        self.assertEqual([self.p.place_table.item(0, c).text() for c in range(2, 6)], ["154.87, 117.12", "0.371", "-0.383", "0.533"])
+
+    def test_arrival_elsewhere_changes_no_hole(self):
+        self.link.events.append("#LLEGO: objetivo x=120.00 y=80.00 z=0.00 | medido x=119.21 y=80.24 | error ex=-0.789 ey=0.240 mm | q1=-11.400 q2=103.213 deg")
+        self.link.events.append("#LLEGO: q1=0.129 q2=0.049 deg | medido x=230.00 y=0.61 mm")
+        self.p.tick()
+        self.assertEqual([self.p.place_table.item(r, 2).text() for r in range(16)], [""] * 16)
+
+    def test_exit_error_uses_the_tip_position_when_the_hole_ends(self):
+        self.link.state = list(HOLD)
+        self.link.state[2], self.link.state[3] = 154.6, 117.5
+        self.p.tick()
+        self.p._show_exit("A-H2")
+        self.assertEqual(self.p.place_table.item(0, 6).text(), "0.100")
+
     def test_screw_result_fills_the_hole_table(self):
         st = list(HOLD); st[13] = 7.0
         self.link.state = st
