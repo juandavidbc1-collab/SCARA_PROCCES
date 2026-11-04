@@ -28,12 +28,12 @@ import numpy as np
 PWM_PER_VOLT = 1023.0 / 12.0
 
 # (b, c): pesos de la consigna en P y en D.
-# "mask" es una definición PROVISIONAL (PI-D: la consigna queda "enmascarada" del término derivativo):
-# el término "masked PID" no aparece en los apuntes del curso; si el profesor lo define distinto, se cambia aquí.
-# "orig" es el PID original del firmware escrito como RST: da el mismo PWM (ver pid_as_rst).
-FORMS = {"pos": (1.0, 1.0), "inc": (0.0, 0.0), "mask": (1.0, 0.0), "orig": (1.0, 0.0)}
-FORM_NAMES = {"pos": "PID posicional", "inc": "PID incremental (I-PD)", "mask": "PID enmascarado (PI-D)",
-              "orig": "PID original en forma RST"}
+# "pi_d" sale de la asignación de polos, con la consigna fuera del término derivativo.
+# "mask" es el RST enmascarado: se ingresan valores de un PID y corre un RST con los polinomios equivalentes (ver pid_as_rst).
+# Esta definición de "enmascarado" la escogió el equipo; falta confirmarla con el profesor.
+FORMS = {"pos": (1.0, 1.0), "inc": (0.0, 0.0), "pi_d": (1.0, 0.0), "mask": (1.0, 0.0)}
+FORM_NAMES = {"pos": "PID posicional", "inc": "PID incremental (I-PD)", "pi_d": "PI-D por polos",
+              "mask": "RST enmascarado (PID en forma RST)"}
 
 
 def plant(K, tau, Ts):
@@ -97,7 +97,7 @@ def polys(kp, ki, kd, s1, b, c, Ts, kff=0.0):
 
 
 def pid_as_rst(kp, ki, kd, kff, tau_vel, Ts):
-    """El PID de src/pid.c como RST exacto -> (kp, ki, kd, s1, kff) para usar con los pesos de FORMS["orig"].
+    """El PID de src/pid.c como RST exacto -> (kp, ki, kd, s1, kff) para usar con los pesos de FORMS["mask"].
 
     pid.c deriva la medición con un filtro de primer orden tau_vel y toma la velocidad de la consigna sin filtrar:
         u = Kff vr + Kp e + Kd (vr - v_filtrada) + I

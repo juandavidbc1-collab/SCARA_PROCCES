@@ -147,7 +147,7 @@ extern const screw_cfg_t   SCREW_CFG;
 
 #define TELE_PERIODO_MS   100
 
-/* Controlador RST: corre cada RST_PERIOD_TICKS del lazo de 1 kHz. Con Ts = 1 ms y la forma "orig" da el mismo PWM que
+/* Controlador RST: corre cada RST_PERIOD_TICKS del lazo de 1 kHz. Con Ts = 1 ms, la forma "mask" (enmascarado) da el mismo PWM que
  * el PID original. Si cambias Ts, vuelve a generar src/rst_defaults.h con tools/rst/simulate.py. */
 #define RST_PERIOD_TICKS  1
 #define RST_TS_S          (RST_PERIOD_TICKS / (float)CONTROL_HZ)
@@ -171,14 +171,13 @@ extern const screw_cfg_t   SCREW_CFG;
 #define SCREW_T_MAX_S        45.0f   /* 25 vueltas: a 230 de PWM el robot midió 0,76 vueltas/s */
 
 /* Servo: sube el destornillador para que baje un tornillo y luego lo vuelve a bajar. 50 Hz, pulso de 500 a 2400 us para -180 a 180 grados.
- * Siempre arranca en 0 grados. -180 grados es el destornillador abajo, confirmado en el robot.
+ * Sin punto medio: arranca abajo y el proceso solo alterna arriba y abajo. -180 grados es el destornillador abajo, confirmado en el robot.
  * [CAMBIAR] SERVO_ARRIBA_DEG: el ángulo al que sube lo suficiente para que pase el tornillo. */
 #define SERVO_HZ             50
 #define SERVO_US_MIN         500.0f
 #define SERVO_US_MAX         2400.0f
 #define SERVO_GRADOS_MIN     (-180.0f)
 #define SERVO_GRADOS_MAX     180.0f
-#define SERVO_INICIO_DEG     0.0f
 #define SERVO_ABAJO_DEG      (-180.0f)
 #define SERVO_ARRIBA_DEG     180.0f  /* confirmado en el robot: con este angulo baja el tornillo */
 

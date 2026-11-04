@@ -74,9 +74,9 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
             snprintf(reply, n, "#ERROR: usa ctrl pid|rst"); return false;
         }
         if (sscanf(l, "rstform %7s", w) == 1) {
-            int fm = !strcmp(w, "pos") ? RST_FORM_POS : !strcmp(w, "inc") ? RST_FORM_INC : !strcmp(w, "mask") ? RST_FORM_MASK : !strcmp(w, "orig") ? RST_FORM_ORIG : -1;
+            int fm = !strcmp(w, "pos") ? RST_FORM_POS : !strcmp(w, "inc") ? RST_FORM_INC : !strcmp(w, "pi_d") ? RST_FORM_PI_D : !strcmp(w, "mask") ? RST_FORM_MASK : -1;
             if (fm >= 0 && ctl_cmd_rstform((rst_form_t)fm)) { snprintf(reply, n, "#OK: forma %s solicitada", RST_FORM_NAME[fm]); return true; }
-            snprintf(reply, n, "#ERROR: usa rstform pos|inc|mask|orig"); return false;
+            snprintf(reply, n, "#ERROR: usa rstform pos|inc|pi_d|mask"); return false;
         }
     }
     if (!strcmp(l, "servo subir") || !strcmp(l, "servo bajar") || sscanf(l, "servo %f", &f[0]) == 1) {
@@ -108,7 +108,7 @@ bool uros_cmd_exec(const char *line, char *reply, size_t n)
         return true;
     }
     if (!strcmp(l, "help")) {
-        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | m3 home/subir/trabajo/bajar/ir/estado | servo g/subir/bajar | ctrl pid/rst | rstform pos/inc/mask/orig | rst | gain");
+        snprintf(reply, n, "#INFO: home stop off clear estop goto ang elbow pulse status | motor n on/off | tool pct | m3 home/subir/trabajo/bajar/ir/estado | servo g/subir/bajar | ctrl pid/rst | rstform pos/inc/pi_d/mask | rst | gain");
         return true;
     }
     if (sscanf(l, "goto %f %f %f", &f[0], &f[1], &f[2]) == 3) return motion_goto_xyz(f[0], f[1], f[2], reply, n) == MOTION_OK;

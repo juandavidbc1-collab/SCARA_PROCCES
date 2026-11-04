@@ -90,7 +90,7 @@ static void print_help(void)
            "  proceso pcb p [n]       solo la PCB p: 1 = A, 2 = B, 3 = C, 4 = D\n"
            "  proceso ensayo [pcb p] [n]   los mismos huecos sin mover el servo; M3 baja hasta 6 mm\n"
            "  proceso lista [pcb p]   imprime los pasos sin mover nada\n"
-           "  ctrl pid|rst            controlador activo;  rstform pos|inc|mask  forma del RST\n"
+           "  ctrl pid|rst            controlador activo;  rstform pos|inc|pi_d|mask  forma del RST\n"
            "  rst                     ver el RST;  rst j kp ki kd s1 b c kff  para cambiarlo\n"
            "  gain                    ver ganancias;  gain j kp ki kd kff fric  para cambiarlas (j = 1 o 2)\n"
            "  pulse j                 pulso corto para comprobar el sentido del motor j\n"

@@ -28,23 +28,23 @@ K_DESIGN = 0.9974                               # identificado en el laboratorio
 KFF = rd.PWM_PER_VOLT / K_DESIGN                # prealimentación de velocidad = inversa de K [PWM por rad/s]
 AXES = {"J1": {"tau": 0.14, "J_load": 0.04}, "J2": {"tau": 0.10, "J_load": 0.01}}
 # Polos de cada forma: (wn [rad/s], zeta, polos auxiliares [rad/s]).
-SPECS = {"pos": (12.0, 0.9, (8.0, 60.0)), "mask": (12.0, 0.9, (8.0, 60.0)), "inc": (15.0, 0.9, (40.0, 60.0))}
+SPECS = {"pos": (12.0, 0.9, (8.0, 60.0)), "pi_d": (12.0, 0.9, (8.0, 60.0)), "inc": (15.0, 0.9, (40.0, 60.0))}
 PID_OLD = (5000.0, 3000.0, 180.0, 80.0)         # el PID original del firmware: su PWM es el que funcionaba en el robot
-ORIG = rd.pid_as_rst(*PID_OLD, VEL_TAU, TS)
+MASK_PID = rd.pid_as_rst(*PID_OLD, VEL_TAU, TS)
 FOLLOW_ERR_DEG = math.degrees(0.20)             # sobre esto el firmware declara falla
 HOLD_TOL_DEG = 0.4
 AMP = math.radians(45.0)
 STEP = math.radians(10.0)
 DIST_NM = 0.8
-SERIES = {"pos": "#2a78d6", "inc": "#eb6834", "mask": "#1baf7a", "orig": "#8a3ffc", "pid": "#eda100"}
+SERIES = {"pos": "#2a78d6", "inc": "#eb6834", "pi_d": "#1baf7a", "mask": "#8a3ffc", "pid": "#eda100"}
 LABEL = dict(rd.FORM_NAMES, pid="PID original (src/pid.c)")
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 ROBUST = [(jl, tc) for jl in (0.25, 1.0, 2.5) for tc in (0.5, 1.0, 1.5)]   # inercia del eslabón y fricción seca
 
 
-def design_orig(ax):
-    """El RST del PID original: no se piden polos, se calculan los que resultan con el modelo de diseño."""
-    kp, ki, kd, s1, kff = ORIG
+def design_mask(ax):
+    """El RST enmascarado: no se piden polos, se calculan los que resultan con el modelo de diseño."""
+    kp, ki, kd, s1, kff = MASK_PID
     A, B = rd.plant(K_DESIGN, AXES[ax]["tau"], TS)
     R, S, _ = rd.polys(kp, ki, kd, s1, 1.0, 1.0, TS)
     return {"A": A, "B": B, "R": R, "S": S, "s1": s1, "kp": kp, "ki": ki, "kd": kd, "kff": kff, "K": K_DESIGN,
@@ -55,7 +55,7 @@ def design_all():
     out = {}
     for ax in AXES:
         out[ax] = {f: dict(rd.design_joint(K_DESIGN, AXES[ax]["tau"], TS, *SPECS[f]), kff=KFF) for f in SPECS}
-        out[ax]["orig"] = design_orig(ax)
+        out[ax]["mask"] = design_mask(ax)
     return out
 
 
@@ -153,13 +153,13 @@ def pick_winner(robust, pwm):
 
 
 def write_header(des, winner):
-    names = {"pos": "RST_FORM_POS", "inc": "RST_FORM_INC", "mask": "RST_FORM_MASK", "orig": "RST_FORM_ORIG"}
+    names = {"pos": "RST_FORM_POS", "inc": "RST_FORM_INC", "pi_d": "RST_FORM_PI_D", "mask": "RST_FORM_MASK"}
     with open(os.path.join(ROOT, "src", "rst_defaults.h"), "w") as f:
         f.write("/* Generado por tools/rst/simulate.py: no editar a mano. Ver docs/rst/REPORTE_RST.md. */\n#pragma once\n")
         f.write("/* Forma con mejor resultado en la simulación */\n#define RST_FORM_DEFAULT %s\n\n" % names[winner])
-        f.write("/* [forma: pos, inc, mask, orig][eje] = { kp, ki, kd, s1, kff }   (PWM/rad, Ts = 1 ms) */\n")
+        f.write("/* [forma: pos, inc, pi_d, mask][eje] = { kp, ki, kd, s1, kff }   (PWM/rad, Ts = 1 ms) */\n")
         f.write("static const float RST_GAINS[4][2][5] = {\n")
-        for fm in ("pos", "inc", "mask", "orig"):
+        for fm in ("pos", "inc", "pi_d", "mask"):
             f.write("    { ")
             f.write(", ".join("{ %.3ff, %.3ff, %.5ff, %.7ff, %.3ff }" % gains(des[ax][fm]) for ax in AXES))
             f.write(" },\n")
@@ -184,7 +184,7 @@ def write_report(des, res, robust, margins, winner, ok, pwm):
 
 Generado por `python3 tools/rst/simulate.py`. Todos los números salen de ese programa.
 
-**Forma elegida para el robot: %s.** Todo es simulación: falta medir en el robot la inercia de los eslabones y repetir estas pruebas.
+**Forma elegida para el robot: %s.** Este reporte es solo simulación y usa parámetros anteriores a la calibración actual. La prueba en el robot está resumida en el README.
 
 ## 1. Planta
 
@@ -233,9 +233,10 @@ R y S salen de la ecuación diofántica `A S + B R = P`, con P dado por los polo
 |---|---|---|---|
 | PID posicional | 1 | 1 | P, I y D actúan sobre el error |
 | PID incremental (I-PD) | 0 | 0 | Solo I actúa sobre el error; P y D sobre la medición |
-| PID enmascarado (PI-D) | 1 | 0 | La consigna queda fuera del término D |
+| PI-D por polos | 1 | 0 | La consigna queda fuera del término D |
+| RST enmascarado (PID en forma RST) | 1 | 0 | Se ingresan valores de un PID y corre un RST con los polinomios equivalentes |
 
-> **Por confirmar con el profesor:** "masked PID" no aparece en los apuntes del curso ni en la búsqueda web. PI-D es una interpretación propia. Si la definición es otra, se cambia `FORMS` en `rst_design.py` y se vuelve a generar este reporte.
+> **Por confirmar con el profesor:** el equipo definió el RST enmascarado como el que recibe valores de un PID y por dentro ejecuta un RST. Si la definición es otra, se cambia `FORMS` en `rst_design.py` y se vuelve a generar este reporte.
 
 **Convención:** este reporte usa la de Landau. Algunos libros intercambian los nombres de R y S.
 
@@ -246,11 +247,11 @@ R y S salen de la ecuación diofántica `A S + B R = P`, con P dado por los polo
     for ax in AXES:
         for f in rd.FORMS:
             d = des[ax][f]
-            spec = ("%.0f rad/s, %.1f, %s rad/s" % (d["wn"], d["zeta"], d["aux"])) if d["wn"] else "Resultan del PID original"
+            spec = ("%.0f rad/s, %.1f, %s rad/s" % (d["wn"], d["zeta"], d["aux"])) if d["wn"] else "Resultan de los valores del PID"
             rows.append([ax, LABEL[f], spec, "%.0f" % d["kp"], "%.0f" % d["ki"],
                          "%.2f" % d["kd"], "%.4f" % d["s1"], "%.1f" % d["kff"], "%.5f" % margins[ax][f]])
     L.append(table(rows))
-    L.append("\n\nLas tres primeras formas salen de la asignación de polos. La incremental lleva polos más rápidos a propósito: su error en rampa es Kp/Ki por la velocidad, y con los polos de las otras dos pasaría el límite de falla del firmware en un movimiento normal.\n\nLa cuarta no se diseñó con polos: es `src/pid.c` escrito como RST, con `s1 = -tau_v/(tau_v + Ts)`, `Kd_RST = Kd (1 + s1)` y `Kff_RST = Kff + Kd`, donde tau_v = 10 ms es el filtro de velocidad del firmware. Sus polos nominales de J1 son %s.\n\nTodos los valores de la última columna deben ser menores que 1 para que el lazo siga estable.\n\nCoeficientes (potencias crecientes de q^-1):\n\n" % ", ".join("%.5f" % abs(p) for p in sorted(des["J1"]["orig"]["poles"], key=abs)))
+    L.append("\n\nLas tres primeras formas salen de la asignación de polos. La incremental lleva polos más rápidos a propósito: su error en rampa es Kp/Ki por la velocidad, y con los polos de las otras dos pasaría el límite de falla del firmware en un movimiento normal.\n\nLa cuarta no se diseñó con polos: es `src/pid.c` escrito como RST, con `s1 = -tau_v/(tau_v + Ts)`, `Kd_RST = Kd (1 + s1)` y `Kff_RST = Kff + Kd`, donde tau_v = 10 ms es el filtro de velocidad del firmware. Sus polos nominales de J1 son %s.\n\nTodos los valores de la última columna deben ser menores que 1 para que el lazo siga estable.\n\nCoeficientes (potencias crecientes de q^-1):\n\n" % ", ".join("%.5f" % abs(p) for p in sorted(des["J1"]["mask"]["poles"], key=abs)))
     rows = [["Eje", "Forma", "R", "S", "T"]]
     for ax in AXES:
         for f, (b, c) in rd.FORMS.items():
@@ -315,14 +316,14 @@ Criterio, en este orden:
 2. Entre las que cumplen, gana la de PWM más parecido al del PID original, que es el que funcionó en el robot.
 
 """ % (0.8 * FOLLOW_ERR_DEG, HOLD_TOL_DEG))
-    rows = [["Forma", "Cumple el criterio 1", "Peor error de seguimiento [grados]", "Diferencia de PWM frente al original, peor eje: rms / máxima"]]
+    rows = [["Forma", "Cumple el criterio 1", "Peor error de seguimiento [grados]", "Diferencia de PWM frente al PID original, peor eje: rms / máxima"]]
     for f in rd.FORMS:
         rows.append([LABEL[f], "Sí" if ok[f] else "No", "%.2f" % max(robust[ax][f]["e_seg"] for ax in AXES),
                      "%.1f / %.1f" % (max(pwm[ax][f][0] for ax in AXES), max(pwm[ax][f][1] for ax in AXES))])
     L.append(table(rows))
     L.append("""
 
-**Resultado: %s.** Es el valor por defecto en el firmware. Las otras formas se eligen con `rstform`, y `pid.c` sigue disponible con `ctrl pid`. El segundo criterio lo pidió el dueño del robot: el PWM del firmware original funcionaba bien. Sin él, ganaría la forma de menor error de seguimiento en la tabla.
+**Resultado: %s.** Es la forma que se carga al activar el RST; el firmware arranca con PID (`src/config.h`). Las otras formas se eligen con `rstform`, y `pid.c` sigue disponible con `ctrl pid`. El segundo criterio lo pidió el dueño del robot: el PWM del firmware original funcionaba bien. Sin él, ganaría la forma de menor error de seguimiento en la tabla.
 
 ## 7. Límites de este resultado
 

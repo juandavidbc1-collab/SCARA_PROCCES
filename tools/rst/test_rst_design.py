@@ -62,9 +62,9 @@ class TestDesign(unittest.TestCase):
         Ts = {n: rd.polys(self.d["kp"], self.d["ki"], self.d["kd"], self.d["s1"], b, c, TS)
               for n, (b, c) in rd.FORMS.items()}
         np.testing.assert_allclose(Ts["pos"][0], Ts["inc"][0])
-        np.testing.assert_allclose(Ts["pos"][1], Ts["mask"][1])
+        np.testing.assert_allclose(Ts["pos"][1], Ts["pi_d"][1])
         self.assertFalse(np.allclose(Ts["pos"][2], Ts["inc"][2]))
-        self.assertFalse(np.allclose(Ts["pos"][2], Ts["mask"][2]))
+        self.assertFalse(np.allclose(Ts["pos"][2], Ts["pi_d"][2]))
 
     def test_original_pid_becomes_an_exact_rst(self):
         """Mismo PID que src/pid.c: filtro de velocidad de 10 ms a 1 kHz; la consigna de velocidad entra sin filtrar."""
@@ -73,7 +73,7 @@ class TestDesign(unittest.TestCase):
         self.assertAlmostEqual(kd, 180.0 * 0.001 / 0.011, places=9)
         self.assertEqual((kp, ki, kff), (5000.0, 3000.0, 260.0))
         # Referencia: la misma ley escrita como PID, con entradas cualquiera.
-        ctl = rd.RstController(kp, ki, kd, s1, *rd.FORMS["orig"], 0.001, kff=kff)
+        ctl = rd.RstController(kp, ki, kd, s1, *rd.FORMS["mask"], 0.001, kff=kff)
         i = qd = y0 = r0 = 0.0
         for k in range(300):
             r = 0.002 * k if k > 20 else 0.0

@@ -2,7 +2,7 @@
 #include <math.h>
 #include "control.h"
 
-const char *const RST_FORM_NAME[] = { "RST posicional", "RST incremental", "RST enmascarado", "RST PID original", "RST a medida" };
+const char *const RST_FORM_NAME[] = { "RST posicional", "RST incremental", "RST PI-D", "RST enmascarado", "RST a medida" };
 
 #define DEG(x) ((x) * (float)M_PI / 180.0f)
 #define K_RAD(extra) (ENC_CUENTAS_SALIDA * (extra) / (2.0f * (float)M_PI))

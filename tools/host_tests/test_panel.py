@@ -302,7 +302,10 @@ class PanelCase(unittest.TestCase):
         self.assertEqual(self.p.hole_table.rowCount(), 16)
         self.assertEqual(self.p.hole_table.item(0, 1).text(), "Pendiente")
         self.p.chk_ensayo.click()
-        self.assertEqual(len(servos()), 48)
+        self.assertEqual(len(servos()), 32)
+
+    def test_servo_has_no_midpoint_button(self):
+        self.assertFalse(hasattr(self.p, "btn_servo_zero"))
 
     def test_choosing_a_pcb_loads_only_its_holes(self):
         self.p.combo_pcb.setCurrentIndex(2)
@@ -371,8 +374,8 @@ class PanelCase(unittest.TestCase):
 
     def test_original_pid_form_is_selectable(self):
         self.link.sent.clear()
-        self.p.ctrl_btn["orig"].click()
-        self.assertIn("rstform orig", self.link.sent)
+        self.p.ctrl_btn["mask"].click()
+        self.assertIn("rstform mask", self.link.sent)
 
     def test_tick_is_fast_with_plots_running(self):
         t0 = time.perf_counter()

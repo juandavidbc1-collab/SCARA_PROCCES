@@ -143,11 +143,11 @@ int main(void)
     motor_dir_fisico[1] = -motor_dir_fisico[1];                      /* se restaura */
 
     /* ============ 6) Las tres formas del RST y el PID de respaldo ============ */
-    printf("\n== ESCENARIO 6: RST posicional, incremental y enmascarado; PID de respaldo ==\n");
-    for (int f = 0; f <= RST_FORM_ORIG + 1; f++) {
+    printf("\n== ESCENARIO 6: RST posicional, incremental, PI-D y enmascarado; PID de respaldo ==\n");
+    for (int f = 0; f <= RST_FORM_MASK + 1; f++) {
         reset_sim(); enc_desconectado[0] = enc_desconectado[1] = false; correr(0.3, "boot", false);
-        const char *nom = f == RST_FORM_ORIG + 1 ? "PID" : RST_FORM_NAME[f];
-        if (f == RST_FORM_ORIG + 1) ctl_cmd_ctrl(CTRL_PID); else ctl_cmd_rstform((rst_form_t)f);
+        const char *nom = f == RST_FORM_MASK + 1 ? "PID" : RST_FORM_NAME[f];
+        if (f == RST_FORM_MASK + 1) ctl_cmd_ctrl(CTRL_PID); else ctl_cmd_rstform((rst_form_t)f);
         correr(0.01, "cfg", false);
         ctl_cmd_home(); correr(120, "home", false);
         CHECK(S.mode == M_HOLD && S.homed[0] && S.homed[1], "%s: Home completo", nom);
@@ -301,7 +301,8 @@ int main(void)
     #define ESPERA_TORNILLO(max_s) do { for (int t = 0; t < (int)((max_s) * 1000) && screw_activo(&S.screw); t++) correr(0.001, "m3", false); correr(0.3, "m3", false); } while (0)
     reset_sim(); correr(0.1, "boot", false);
     S.m3_ref = true;                      /* como tras "m3 home" */
-    CHECK(g_servo_deg == SERVO_INICIO_DEG, "el servo arranca en 0 grados");
+    CHECK(g_servo_deg == SERVO_ABAJO_DEG, "el servo arranca abajo, sin punto medio");
+    ctl_cmd_servo(SERVO_ARRIBA_DEG); correr(0.01, "s", false);
     ctl_cmd_screw(12.0f, 0.4f); correr(0.05, "m3", false);
     CHECK(!screw_activo(&S.screw), "sin bajar el destornillador no atornilla");
     ctl_cmd_servo(SERVO_ABAJO_DEG); correr(0.01, "s", false);
@@ -400,7 +401,7 @@ int main(void)
         ctl_cmd_ctrl(CTRL_PID); correr(0.05, "c", false);
         ctl_cmd_home(); for (int t = 0; t < 45000 && !(S.mode == M_HOLD && S.homed[0] && S.homed[1]); t++) correr(0.001, "home", false);
         rst_ctl_t par[NJ];
-        for (int j = 0; j < NJ; j++) { rst_cargar(j, RST_FORM_ORIG); par[j] = S.rst[j]; rst_reset(&par[j], S.q[j]); pid_reset(&S.pid[j]); S.qdref[j] = 0; S.qd[j] = 0; }
+        for (int j = 0; j < NJ; j++) { rst_cargar(j, RST_FORM_MASK); par[j] = S.rst[j]; rst_reset(&par[j], S.q[j]); pid_reset(&S.pid[j]); S.qdref[j] = 0; S.qd[j] = 0; }
         float q[2] = { 0.6f, 1.2f };
         ctl_cmd_move(q, (float[]){NAN, NAN, NAN});
         double dmax = 0, sum = 0; int nn = 0;

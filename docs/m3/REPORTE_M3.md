@@ -125,7 +125,7 @@ Estado final: **done**. Duración simulada del ciclo: 171 s. Error máximo de po
 - Modelo y relación de M3, y sus valores R, Ke y Kt.
 - Tornillo real: paso, largo, material y torque de apriete. Valores actuales: 12 vueltas, 0,4 N·m.
 - Que al bajar M3 la punta gire en el sentido de apretar (`TOOL_MOTOR_SIGN` y `TOOL_ENC_SIGN` ya bajan M3 con PWM positivo), y cuentas por vuelta (`TOOL_ENC_CUENTAS`).
-- Ángulo de subida del servo (`SERVO_ARRIBA_DEG`). Arranca en 0 grados (`SERVO_INICIO_DEG`) y el destornillador abajo es -180 (`SERVO_ABAJO_DEG`).
+- Ángulo de subida del servo (`SERVO_ARRIBA_DEG`). Arranca abajo, en -180 grados (`SERVO_ABAJO_DEG`).
 - **Señal del servo:** en la placa, cambia R40 por 330 Ω y retira C14. R41 se queda.
 - **Alimentación del servo:** el MG90S puede pedir unos 700 mA calado, de los mismos 5 V del LM2596 que alimentan encoders y lógica. Pon 470 µF entre los pines 1 (+) y 3 (-) de J13 y comprueba que el ESP32 no se reinicie cuando el servo se mueve.
 - **Altura:** el brazo no tiene eje z. Comprueba que la punta pase sobre las placas sin chocar en los traslados, y que M3 baje con el tornillo mientras este entra (6 mm). Después M3 sube por tiempo girando al revés (`subir_pct` y `subir_s` en `ros2/secuencia.yaml`): se supone que la punta se suelta sola del tornillo, sin medirlo.

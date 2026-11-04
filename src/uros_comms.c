@@ -65,7 +65,7 @@
 enum { STATE_Q1_DEG = 0, STATE_Q2_DEG, STATE_X, STATE_Y, STATE_MODE, STATE_FAULT, STATE_HOMED1, STATE_HOMED2,
        STATE_FC_BITS, STATE_QREF1_DEG, STATE_QREF2_DEG, STATE_DUTY1, STATE_DUTY2,
        STATE_EN_BITS,      /* bit 0 = J1, bit 1 = J2, bit 2 = M3 activos */
-       STATE_CTRL,         /* 0 = PID; 1..5 = RST posicional, incremental, enmascarado, PID original, a medida */
+       STATE_CTRL,         /* 0 = PID; 1..5 = RST posicional, incremental, PI-D, enmascarado, a medida */
        STATE_TOOL,         /* PWM de M3 */
        /* Atornillado. Calculado con el modelo de M3: no hay sensor de corriente. */
        STATE_TOOL_I, STATE_TOOL_TORQUE, STATE_TOOL_FUERZA, STATE_TOOL_PRESION, STATE_TOOL_VUELTAS, STATE_TOOL_PROF,
